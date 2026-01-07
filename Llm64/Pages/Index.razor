@@ -1,0 +1,125 @@
+﻿@page "/"
+@using Llm64.Services
+
+<h1>PNG Base64 Embedder</h1>
+
+<div class="container">
+    <div class="upload-section">
+        <label for="fileInput">Upload PNG:</label>
+        <InputFile id="fileInput" OnChange="HandleFileSelected" accept=".png" />
+    </div>
+
+    <div class="prompt-section">
+        <label for="promptInput">Text Prompt:</label>
+        <textarea id="promptInput" @bind="textPrompt" rows="3" style="width: 100%;" placeholder="Enter text to embed in base64..."></textarea>
+    </div>
+
+    <button @onclick="ProcessImage" disabled="@(uploadedFile == null || string.IsNullOrWhiteSpace(textPrompt))">
+        Process Image
+    </button>
+
+    @if (isProcessing)
+    {
+        <p>Processing...</p>
+    }
+
+    @if (processedImageData != null)
+    {
+        <div class="result-section">
+            <h3>Modified Image:</h3>
+            <img src="@processedImageData" alt="Modified PNG" style="max-width: 100%; border: 1px solid #ccc;" />
+            <div>
+                <a href="@processedImageData" download="modified.png">
+                    <button>Download Modified PNG</button>
+                </a>
+            </div>
+            <div style="margin-top: 10px;">
+                <p><strong>Base64 excerpt:</strong></p>
+                <pre style="background: #f5f5f5; padding: 10px; overflow-x: auto; max-height: 200px;">@base64Excerpt</pre>
+            </div>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="error">@errorMessage</div>
+    }
+</div>
+
+<style>
+    .container { max-width: 800px; margin: 20px auto; }
+    .upload-section, .prompt-section { margin: 20px 0; }
+    .result-section { margin-top: 30px; }
+    .error { color: red; margin-top: 20px; }
+    button { margin-top: 10px; padding: 10px 20px; }
+    label { font-weight: bold; display: block; margin-bottom: 5px; }
+</style>
+
+@code {
+    private IBrowserFile? uploadedFile;
+    private string textPrompt = "";
+    private string? processedImageData;
+    private string? base64Excerpt;
+    private string? errorMessage;
+    private bool isProcessing;
+
+    private void HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        uploadedFile = e.File;
+        processedImageData = null;
+        base64Excerpt = null;
+        errorMessage = null;
+    }
+
+    private async Task ProcessImage()
+    {
+        if (uploadedFile == null || string.IsNullOrWhiteSpace(textPrompt))
+            return;
+
+        isProcessing = true;
+        errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            // Read the uploaded PNG
+            using var stream = uploadedFile.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024); // 10MB max
+            using var memoryStream = new MemoryStream();
+            await stream.CopyToAsync(memoryStream);
+            byte[] pngData = memoryStream.ToArray();
+
+            // Validate PNG
+            if (!PngTextEmbedder.IsPng(pngData))
+            {
+                errorMessage = "Invalid PNG file";
+                return;
+            }
+
+            // Normalize the prompt (replace newlines with /, remove invalid base64 chars)
+            string normalizedPrompt = PngTextEmbedder.NormalizePrompt(textPrompt);
+
+            // Modify PNG to include the text in base64
+            byte[] modifiedPng = PngTextEmbedder.EmbedTextInPng(pngData, normalizedPrompt);
+
+            // Convert to base64 data URL
+            string base64 = Convert.ToBase64String(modifiedPng);
+            processedImageData = $"data:image/png;base64,{base64}";
+
+            // Find the prompt in the base64 and show excerpt
+            base64Excerpt = PngTextEmbedder.FindTextInBase64(base64, normalizedPrompt);
+            if (base64Excerpt == null)
+            {
+                base64Excerpt = "Text not found in base64 output";
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            isProcessing = false;
+            StateHasChanged();
+        }
+    }
+}
