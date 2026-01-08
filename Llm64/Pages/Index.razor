@@ -128,7 +128,7 @@
 .title {
     font-size: 4rem;
     font-weight: 800;
-    background: linear-gradient(135deg, #fff 0%, #f0f9ff 100%);
+    background: linear-gradient(135deg, #fff 0%, #f5f5dc 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -138,14 +138,14 @@
 
 .subtitle {
     font-size: 1.25rem;
-    color: #e0f2fe;
+    color: #2c1810;
     margin-bottom: 0.5rem;
     font-weight: 500;
 }
 
 .tagline {
     font-size: 0.95rem;
-    color: #bae6fd;
+    color: #3d2817;
     font-style: italic;
 }
 
@@ -177,19 +177,19 @@
     border-radius: 16px;
     padding: 3rem 2rem;
     text-align: center;
-    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+    background: linear-gradient(135deg, #faf8f3 0%, #f5efe6 100%);
     transition: all 0.3s;
 }
 
 .file-upload-label:hover .file-upload-content {
-    border-color: #60a5fa;
-    background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+    border-color: #87ceeb;
+    background: linear-gradient(135deg, #f0ebe3 0%, #e8dfd5 100%);
 }
 
 .upload-icon {
     width: 64px;
     height: 64px;
-    color: #3b82f6;
+    color: #4a90a4;
     margin-bottom: 1rem;
 }
 
@@ -197,7 +197,7 @@
     display: block;
     font-size: 1.125rem;
     font-weight: 600;
-    color: #1e40af;
+    color: #2a6f7f;
     margin-bottom: 0.5rem;
 }
 
@@ -237,9 +237,9 @@
 
 .text-input:focus {
     outline: none;
-    border-color: #3b82f6;
+    border-color: #4a90a4;
     background: white;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    box-shadow: 0 0 0 3px rgba(74, 144, 164, 0.1);
 }
 
 .text-counter {
@@ -255,12 +255,12 @@
     font-size: 1.125rem;
     font-weight: 600;
     color: white;
-    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    background: linear-gradient(135deg, #d2b48c 0%, #4a90a4 100%);
     border: none;
     border-radius: 12px;
     cursor: pointer;
     transition: all 0.3s;
-    box-shadow: 0 4px 12px rgba(245, 87, 108, 0.3);
+    box-shadow: 0 4px 12px rgba(74, 144, 164, 0.3);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -269,7 +269,7 @@
 
 .process-button:hover:not(:disabled) {
     transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(245, 87, 108, 0.4);
+    box-shadow: 0 6px 20px rgba(74, 144, 164, 0.4);
 }
 
 .process-button:disabled {
@@ -375,17 +375,17 @@
     font-size: 1.125rem;
     font-weight: 600;
     color: white;
-    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    background: linear-gradient(135deg, #87ceeb 0%, #4a90a4 100%);
     border: none;
     border-radius: 12px;
     text-decoration: none;
     transition: all 0.3s;
-    box-shadow: 0 4px 12px rgba(79, 172, 254, 0.3);
+    box-shadow: 0 4px 12px rgba(74, 144, 164, 0.3);
 }
 
 .download-button:hover {
     transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(79, 172, 254, 0.4);
+    box-shadow: 0 6px 20px rgba(74, 144, 164, 0.4);
 }
 
 .download-icon {
@@ -698,20 +698,14 @@
             var (modWidth, modHeight) = GetImageDimensions(modifiedPng);
             modifiedMetadata = $"{modWidth} × {modHeight} • {modifiedPng.Length:N0} bytes";
 
-            // Format base64 at 76 characters per line
-            base64Excerpt = FormatBase64WithLineBreaks(base64);
+            // Format base64 at 76 characters per line and take first 50 lines
+            string fullBase64 = FormatBase64WithLineBreaks(base64);
+            var lines = fullBase64.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+            base64Excerpt = string.Join("\n", lines.Take(50));
 
-            // Get normalized lines to search for in base64
-            var normalizedLines = PngTextEmbedder.NormalizePrompt(textPrompt);
-            if (normalizedLines.Count > 0)
+            if (lines.Length > 50)
             {
-                // Highlight the embedded text in the base64 output
-                var searchResult = PngTextEmbedder.FindTextInBase64(base64, normalizedLines[0]);
-                if (searchResult != null)
-                {
-                    // Replace the excerpt with highlighted version
-                    base64Excerpt = searchResult;
-                }
+                base64Excerpt += "\n... (truncated)";
             }
         }
         catch (Exception ex)

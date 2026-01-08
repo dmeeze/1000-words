@@ -4,6 +4,30 @@ A web application that embeds text into PNG images at the base64 level, allowing
 
 ## Recent Updates
 
+### Color Scheme and Navigation Update - Completed (2026-01-08)
+
+**Changes Implemented:**
+- Updated color scheme from blue/pink to "sand sea and sky" gradient theme
+- Fixed base64Excerpt display to show first 50 lines (previously showed limited excerpt)
+- Added "What is this?" page for concept explanation (placeholder content)
+- Added navigation bar with links to Home and About pages
+- Updated all UI colors to match new gradient theme:
+  - Body background: Sand → Sea → Sky gradient (#e8d5c4 → #d2b48c → #87ceeb → #4a90a4 → #b0d4f1 → #e6f3ff)
+  - Button gradients: Sand to sea tones
+  - Upload section: Warm sand tones
+  - Navigation: Ocean blue accent colors
+
+**Navigation:**
+- Sticky navigation bar at top with "1000 Words" branding
+- Links: Home and "What is this?"
+- Consistent styling with sand/sea/sky theme
+- Responsive design for mobile
+
+**Base64 Display Enhancement:**
+- Now displays first 50 lines of base64 output
+- Truncation indicator when more than 50 lines
+- Better readability for reviewing embedded text
+
 ### UI Redesign - Completed (2026-01-08)
 
 The Blazor WebAssembly application has been redesigned with an elegant tropical-themed interface:
