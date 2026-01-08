@@ -1,0 +1,182 @@
+name: CI/CD - Test and Deploy to S3
+
+on:
+  push:
+    branches: [ release, staging ]
+  workflow_dispatch:
+    inputs:
+      base_href:
+        description: 'Base href for deployment (e.g., /1000-words/)'
+        required: false
+        default: '/1000-words/'
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+        - production
+        - staging
+
+env:
+  DOTNET_VERSION: '9.0.x'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Restore dependencies
+      run: dotnet restore
+
+    - name: Build solution
+      run: dotnet build --no-restore
+
+    - name: Run tests
+      run: dotnet test --no-build --verbosity normal
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Set deployment variables
+      id: vars
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          BASE_HREF="${{ github.event.inputs.base_href }}"
+          ENVIRONMENT="${{ github.event.inputs.environment }}"
+        else
+          if [ "${{ github.ref }}" = "refs/heads/release" ]; then
+            BASE_HREF="/1000-words/"
+            ENVIRONMENT="production"
+          elif [ "${{ github.ref }}" = "refs/heads/staging" ]; then
+            BASE_HREF="/1000-words-staging/"
+            ENVIRONMENT="staging"
+          fi
+        fi
+
+        echo "base_href=${BASE_HREF}" >> $GITHUB_OUTPUT
+        echo "environment=${ENVIRONMENT}" >> $GITHUB_OUTPUT
+        echo "s3_bucket=${{ secrets.AWS_S3_BUCKET_NAME }}" >> $GITHUB_OUTPUT
+        echo "cloudfront_distribution_id=${{ secrets.AWS_CLOUDFRONT_DISTRIBUTION_ID }}" >> $GITHUB_OUTPUT
+
+    - name: Build and publish
+      run: |
+        # Set build timestamp
+        BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        echo "Build timestamp: $BUILD_TIME"
+
+        dotnet publish Llm64/Llm64.csproj -c Release -o publish -p:BaseHref="${{ steps.vars.outputs.base_href }}" -p:BuildTime="$BUILD_TIME"
+
+        # Determine the correct wwwroot path based on base href
+        if [ "${{ steps.vars.outputs.base_href }}" = "/" ]; then
+          PUBLISH_PATH="publish/wwwroot"
+        else
+          # Extract subdirectory name from base href (e.g., /1000-words/ -> 1000-words)
+          SUBDIR=$(echo "${{ steps.vars.outputs.base_href }}" | sed 's|^/||' | sed 's|/$||')
+          PUBLISH_PATH="publish/wwwroot/${SUBDIR}"
+        fi
+
+        # Replace base href token in index.html
+        INDEX_FILE="${PUBLISH_PATH}/index.html"
+        if [ -f "$INDEX_FILE" ]; then
+          sed -i 's|__BASE_HREF__|${{ steps.vars.outputs.base_href }}|g' "$INDEX_FILE"
+          echo "Updated base href in index.html to: ${{ steps.vars.outputs.base_href }}"
+        fi
+
+        echo "PUBLISH_PATH=${PUBLISH_PATH}" >> $GITHUB_ENV
+        echo "Publishing from: ${PUBLISH_PATH}"
+        ls -la "${PUBLISH_PATH}"
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
+
+    - name: Deploy to S3
+      run: |
+        # Sync files to S3
+        if [ "${{ steps.vars.outputs.base_href }}" = "/" ]; then
+          # Root deployment
+          aws s3 sync "${PUBLISH_PATH}/" "s3://${{ steps.vars.outputs.s3_bucket }}/" \
+            --delete \
+            --cache-control "public, max-age=31536000, immutable" \
+            --exclude "*.html" \
+            --exclude "manifest.json" \
+            --exclude "sw.js"
+
+          # Upload HTML files with no-cache
+          aws s3 sync "${PUBLISH_PATH}/" "s3://${{ steps.vars.outputs.s3_bucket }}/" \
+            --cache-control "public, max-age=0, must-revalidate" \
+            --include "*.html" \
+            --include "manifest.json" \
+            --include "sw.js"
+        else
+          # Subpath deployment
+          SUBDIR=$(echo "${{ steps.vars.outputs.base_href }}" | sed 's|^/||' | sed 's|/$||')
+
+          aws s3 sync "${PUBLISH_PATH}/" "s3://${{ steps.vars.outputs.s3_bucket }}/${SUBDIR}/" \
+            --delete \
+            --cache-control "public, max-age=31536000, immutable" \
+            --exclude "*.html" \
+            --exclude "manifest.json" \
+            --exclude "sw.js"
+
+          # Upload HTML files with no-cache
+          aws s3 sync "${PUBLISH_PATH}/" "s3://${{ steps.vars.outputs.s3_bucket }}/${SUBDIR}/" \
+            --cache-control "public, max-age=0, must-revalidate" \
+            --include "*.html" \
+            --include "manifest.json" \
+            --include "sw.js"
+        fi
+
+    - name: Invalidate CloudFront cache
+      if: ${{ steps.vars.outputs.cloudfront_distribution_id != '' }}
+      run: |
+        if [ "${{ steps.vars.outputs.base_href }}" = "/" ]; then
+          # Root deployment - invalidate everything
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ steps.vars.outputs.cloudfront_distribution_id }}" \
+            --paths "/*"
+        else
+          # Subpath deployment - invalidate only the subpath
+          SUBDIR=$(echo "${{ steps.vars.outputs.base_href }}" | sed 's|^/||' | sed 's|/$||')
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ steps.vars.outputs.cloudfront_distribution_id }}" \
+            --paths "/${SUBDIR}/*"
+        fi
+
+        echo "CloudFront cache invalidation triggered for distribution: ${{ steps.vars.outputs.cloudfront_distribution_id }}"
+
+    - name: Deploy summary
+      run: |
+        echo "## 🚀 Deployment Complete" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Environment:** ${{ steps.vars.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Base href:** ${{ steps.vars.outputs.base_href }}" >> $GITHUB_STEP_SUMMARY
+        echo "**S3 bucket:** ${{ steps.vars.outputs.s3_bucket }}" >> $GITHUB_STEP_SUMMARY
+        if [ -n "${{ steps.vars.outputs.cloudfront_distribution_id }}" ]; then
+          echo "**CloudFront distribution:** ${{ steps.vars.outputs.cloudfront_distribution_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Cache invalidation:** Triggered for updated content" >> $GITHUB_STEP_SUMMARY
+        fi
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "The PWA has been successfully deployed and is now available." >> $GITHUB_STEP_SUMMARY

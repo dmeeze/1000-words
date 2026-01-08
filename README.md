@@ -91,3 +91,45 @@ The Blazor WebAssembly application has been redesigned with an elegant tropical-
 - Build passes with 0 warnings, 0 errors
 
 The application is ready to use with its new elegant interface.
+
+## Deployment
+
+### GitHub Actions - S3 Deployment
+
+The project includes an automated CI/CD pipeline that builds, tests, and deploys the Blazor WASM application to Amazon S3.
+
+**Workflow File:** `.github/workflows/deploy-s3.yml`
+
+**Triggers:**
+- Automatic deployment on push to `release` or `staging` branches
+- Manual deployment via workflow_dispatch with customizable base href
+
+**Branch Deployment Paths:**
+- `release` branch → deploys to `/1000-words/` subdirectory
+- `staging` branch → deploys to `/1000-words-staging/` subdirectory
+- `main` branch → does not trigger automatic deployment
+
+**Features:**
+- Runs all unit tests before deployment
+- Builds and publishes Blazor WASM app with specified base href
+- Syncs files to S3 with proper cache headers:
+  - Static assets: `max-age=31536000, immutable`
+  - HTML files: `max-age=0, must-revalidate`
+- Invalidates CloudFront cache for updated content
+- Provides deployment summary with environment details
+
+**Required GitHub Secrets:**
+- `AWS_ACCESS_KEY_ID` - AWS access key for S3 deployment
+- `AWS_SECRET_ACCESS_KEY` - AWS secret key
+- `AWS_REGION` - AWS region (e.g., us-east-1)
+- `AWS_S3_BUCKET_NAME` - Target S3 bucket name
+- `AWS_CLOUDFRONT_DISTRIBUTION_ID` - (Optional) CloudFront distribution ID for cache invalidation
+
+**Manual Deployment:**
+1. Go to Actions tab in GitHub repository
+2. Select "CI/CD - Test and Deploy to S3" workflow
+3. Click "Run workflow"
+4. Choose branch and enter custom base href (e.g., `/1000-words/`)
+5. Select environment (production/staging)
+
+The workflow ensures that only tested, validated code is deployed to production.
