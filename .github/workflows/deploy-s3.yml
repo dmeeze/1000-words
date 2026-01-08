@@ -83,18 +83,12 @@ jobs:
         BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
         echo "Build timestamp: $BUILD_TIME"
 
-        dotnet publish Llm64/Llm64.csproj -c Release -o publish -p:BaseHref="${{ steps.vars.outputs.base_href }}" -p:BuildTime="$BUILD_TIME"
+        dotnet publish Llm64/Llm64.csproj -c Release -o publish -p:BaseHref="${{ steps.vars.outputs.base_href }}"
 
-        # Determine the correct wwwroot path based on base href
-        if [ "${{ steps.vars.outputs.base_href }}" = "/" ]; then
-          PUBLISH_PATH="publish/wwwroot"
-        else
-          # Extract subdirectory name from base href (e.g., /1000-words/ -> 1000-words)
-          SUBDIR=$(echo "${{ steps.vars.outputs.base_href }}" | sed 's|^/||' | sed 's|/$||')
-          PUBLISH_PATH="publish/wwwroot/${SUBDIR}"
-        fi
+        # Blazor WASM always publishes to wwwroot directly
+        PUBLISH_PATH="publish/wwwroot"
 
-        # Replace base href token in index.html
+        # Replace base href token in index.html if present
         INDEX_FILE="${PUBLISH_PATH}/index.html"
         if [ -f "$INDEX_FILE" ]; then
           sed -i 's|__BASE_HREF__|${{ steps.vars.outputs.base_href }}|g' "$INDEX_FILE"
