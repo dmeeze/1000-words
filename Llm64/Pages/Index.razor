@@ -1,74 +1,643 @@
-﻿@page "/"
+@page "/"
 @using Llm64.Services
 
-<h1>PNG Base64 Embedder</h1>
+<PageTitle>1000 Words</PageTitle>
 
-<div class="container">
-    <div class="upload-section">
-        <label for="fileInput">Upload PNG:</label>
-        <InputFile id="fileInput" OnChange="HandleFileSelected" accept=".png" />
+<div class="app-container">
+    <div class="hero">
+        <h1 class="title">1000 Words</h1>
+        <p class="subtitle">Make text show up when a PNG is shown in base64</p>
+        <p class="tagline">Because when a picture already has a thousand words... whats a few more?</p>
     </div>
 
-    <div class="prompt-section">
-        <label for="promptInput">Text Prompt:</label>
-        <textarea id="promptInput" @bind="textPrompt" rows="3" style="width: 100%;" placeholder="Enter text to embed in base64..."></textarea>
-    </div>
-
-    <button @onclick="ProcessImage" disabled="@(uploadedFile == null || string.IsNullOrWhiteSpace(textPrompt))">
-        Process Image
-    </button>
-
-    @if (isProcessing)
-    {
-        <p>Processing...</p>
-    }
-
-    @if (processedImageData != null)
-    {
-        <div class="result-section">
-            <h3>Modified Image:</h3>
-            <img src="@processedImageData" alt="Modified PNG" style="max-width: 100%; border: 1px solid #ccc;" />
-            <div>
-                <a href="@processedImageData" download="modified.png">
-                    <button>Download Modified PNG</button>
-                </a>
-            </div>
-            <div style="margin-top: 10px;">
-                <p><strong>Base64 excerpt:</strong></p>
-                <pre style="background: #f5f5f5; padding: 10px; overflow-x: auto; max-height: 200px;">@base64Excerpt</pre>
-            </div>
+    <div class="main-card">
+        <div class="upload-section">
+            <label class="file-upload-label">
+                <div class="file-upload-content">
+                    <svg class="upload-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    </svg>
+                    <span class="file-upload-text">@GetFileUploadText()</span>
+                    <span class="file-upload-hint">PNG files up to 5MB</span>
+                </div>
+                <InputFile id="fileInput" OnChange="HandleFileSelected" accept=".png" class="file-input" />
+            </label>
         </div>
-    }
 
-    @if (!string.IsNullOrEmpty(errorMessage))
-    {
-        <div class="error">@errorMessage</div>
-    }
+        <div class="text-section">
+            <label for="promptInput" class="text-label">Your Text</label>
+            <textarea
+                id="promptInput"
+                @bind="textPrompt"
+                @oninput="HandleTextInput"
+                rows="5"
+                maxlength="@maxTextSize"
+                class="text-input"
+                placeholder="Enter any text to embed in the PNG... (up to 5MB)"></textarea>
+            <div class="text-counter">@GetTextSize() / 5MB</div>
+        </div>
+
+        <button
+            @onclick="ProcessImage"
+            disabled="@(!CanProcess())"
+            class="process-button">
+            @if (isProcessing)
+            {
+                <span class="spinner"></span>
+                <span>Processing...</span>
+            }
+            else
+            {
+                <span>Generate Image</span>
+            }
+        </button>
+
+        @if (!string.IsNullOrEmpty(errorMessage))
+        {
+            <div class="error-message">
+                <svg class="error-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+                </svg>
+                @errorMessage
+            </div>
+        }
+
+        @if (processedImageData != null)
+        {
+            <div class="result-section">
+                <h3 class="result-title">Image Comparison</h3>
+
+                <div class="image-comparison">
+                    <div class="image-column">
+                        <h4 class="image-header">Original</h4>
+                        <div class="image-preview">
+                            <img src="@originalImageData" alt="Original PNG" class="result-image" />
+                        </div>
+                        <p class="image-metadata">@originalMetadata</p>
+                    </div>
+
+                    <div class="image-column">
+                        <h4 class="image-header">Modified</h4>
+                        <div class="image-preview">
+                            <img src="@processedImageData" alt="Modified PNG" class="result-image" />
+                        </div>
+                        <p class="image-metadata">@modifiedMetadata</p>
+                    </div>
+                </div>
+
+                <a href="@processedImageData" download="1000-words.png" class="download-button">
+                    <svg class="download-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    Download Modified PNG
+                </a>
+
+                <div class="base64-section">
+                    <button @onclick="ToggleBase64" class="base64-toggle">
+                        <span>@(showBase64 ? "Hide" : "View") Base64 Header</span>
+                        <svg class="chevron @(showBase64 ? "rotated" : "")" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
+                        </svg>
+                    </button>
+
+                    @if (showBase64)
+                    {
+                        <div class="base64-content">
+                            <pre class="base64-output">@base64Excerpt</pre>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </div>
 </div>
 
 <style>
-    .container { max-width: 800px; margin: 20px auto; }
-    .upload-section, .prompt-section { margin: 20px 0; }
-    .result-section { margin-top: 30px; }
-    .error { color: red; margin-top: 20px; }
-    button { margin-top: 10px; padding: 10px 20px; }
-    label { font-weight: bold; display: block; margin-bottom: 5px; }
+.app-container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 2rem 1rem;
+}
+
+.hero {
+    text-align: center;
+    margin-bottom: 3rem;
+    animation: fadeInDown 0.8s ease-out;
+}
+
+.title {
+    font-size: 4rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, #fff 0%, #f0f9ff 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 0.5rem;
+    text-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.subtitle {
+    font-size: 1.25rem;
+    color: #e0f2fe;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+}
+
+.tagline {
+    font-size: 0.95rem;
+    color: #bae6fd;
+    font-style: italic;
+}
+
+.main-card {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-radius: 24px;
+    padding: 2.5rem;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+    animation: fadeInUp 0.8s ease-out;
+}
+
+.upload-section {
+    margin-bottom: 2rem;
+}
+
+.file-upload-label {
+    display: block;
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+
+.file-upload-label:hover {
+    transform: translateY(-2px);
+}
+
+.file-upload-content {
+    border: 3px dashed #cbd5e1;
+    border-radius: 16px;
+    padding: 3rem 2rem;
+    text-align: center;
+    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+    transition: all 0.3s;
+}
+
+.file-upload-label:hover .file-upload-content {
+    border-color: #60a5fa;
+    background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+}
+
+.upload-icon {
+    width: 64px;
+    height: 64px;
+    color: #3b82f6;
+    margin-bottom: 1rem;
+}
+
+.file-upload-text {
+    display: block;
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: #1e40af;
+    margin-bottom: 0.5rem;
+}
+
+.file-upload-hint {
+    display: block;
+    font-size: 0.875rem;
+    color: #64748b;
+}
+
+.file-input {
+    display: none;
+}
+
+.text-section {
+    margin-bottom: 2rem;
+}
+
+.text-label {
+    display: block;
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: #1e293b;
+    margin-bottom: 0.75rem;
+}
+
+.text-input {
+    width: 100%;
+    padding: 1rem;
+    border: 2px solid #e2e8f0;
+    border-radius: 12px;
+    font-size: 1rem;
+    font-family: 'Courier New', monospace;
+    resize: vertical;
+    transition: all 0.3s;
+    background: #f8fafc;
+}
+
+.text-input:focus {
+    outline: none;
+    border-color: #3b82f6;
+    background: white;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.text-counter {
+    text-align: right;
+    font-size: 0.875rem;
+    color: #64748b;
+    margin-top: 0.5rem;
+}
+
+.process-button {
+    width: 100%;
+    padding: 1rem 2rem;
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: white;
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    border: none;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.3s;
+    box-shadow: 0 4px 12px rgba(245, 87, 108, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+}
+
+.process-button:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(245, 87, 108, 0.4);
+}
+
+.process-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.spinner {
+    width: 20px;
+    height: 20px;
+    border: 3px solid rgba(255, 255, 255, 0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.error-message {
+    background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+    color: #991b1b;
+    padding: 1rem 1.25rem;
+    border-radius: 12px;
+    margin-top: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    border: 2px solid #fca5a5;
+}
+
+.error-icon {
+    width: 24px;
+    height: 24px;
+    flex-shrink: 0;
+}
+
+.result-section {
+    margin-top: 2.5rem;
+    padding-top: 2.5rem;
+    border-top: 2px solid #e2e8f0;
+    animation: fadeIn 0.6s ease-out;
+}
+
+.result-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #1e293b;
+    margin-bottom: 1.5rem;
+    text-align: center;
+}
+
+.image-comparison {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.image-column {
+    display: flex;
+    flex-direction: column;
+}
+
+.image-header {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: #1e293b;
+    margin-bottom: 0.75rem;
+    text-align: center;
+}
+
+.image-preview {
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    margin-bottom: 0.75rem;
+    background: #f8fafc;
+}
+
+.result-image {
+    width: 100%;
+    display: block;
+    max-height: 300px;
+    object-fit: contain;
+}
+
+.image-metadata {
+    font-size: 0.75rem;
+    color: #64748b;
+    text-align: center;
+    line-height: 1.5;
+}
+
+.download-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 1rem 2rem;
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: white;
+    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    border: none;
+    border-radius: 12px;
+    text-decoration: none;
+    transition: all 0.3s;
+    box-shadow: 0 4px 12px rgba(79, 172, 254, 0.3);
+}
+
+.download-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(79, 172, 254, 0.4);
+}
+
+.download-icon {
+    width: 24px;
+    height: 24px;
+}
+
+.base64-section {
+    margin-top: 1.5rem;
+}
+
+.base64-toggle {
+    width: 100%;
+    padding: 0.875rem 1.25rem;
+    background: #f1f5f9;
+    border: 2px solid #e2e8f0;
+    border-radius: 12px;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #475569;
+    cursor: pointer;
+    transition: all 0.3s;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.base64-toggle:hover {
+    background: #e2e8f0;
+    border-color: #cbd5e1;
+}
+
+.chevron {
+    width: 20px;
+    height: 20px;
+    transition: transform 0.3s;
+}
+
+.chevron.rotated {
+    transform: rotate(180deg);
+}
+
+.base64-content {
+    margin-top: 1rem;
+    animation: slideDown 0.3s ease-out;
+}
+
+.base64-output {
+    background: #1e293b;
+    color: #e2e8f0;
+    padding: 1.5rem;
+    border-radius: 12px;
+    font-size: 0.875rem;
+    font-family: 'Courier New', monospace;
+    overflow-x: auto;
+    max-height: 300px;
+    line-height: 1.6;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+@@keyframes fadeInDown {
+    from {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Responsive design */
+@@media (max-width: 768px) {
+    .image-comparison {
+        grid-template-columns: 1fr;
+    }
+}
+
+@@media (max-width: 640px) {
+    .app-container {
+        padding: 1rem 0.75rem;
+    }
+
+    .title {
+        font-size: 2.5rem;
+    }
+
+    .subtitle {
+        font-size: 1rem;
+    }
+
+    .main-card {
+        padding: 1.5rem;
+        border-radius: 16px;
+    }
+
+    .file-upload-content {
+        padding: 2rem 1rem;
+    }
+
+    .upload-icon {
+        width: 48px;
+        height: 48px;
+    }
+}
 </style>
 
 @code {
     private IBrowserFile? uploadedFile;
     private string textPrompt = "";
+    private string? originalImageData;
     private string? processedImageData;
+    private string? originalMetadata;
+    private string? modifiedMetadata;
     private string? base64Excerpt;
     private string? errorMessage;
     private bool isProcessing;
+    private bool showBase64;
+
+    private const long maxFileSize = 5 * 1024 * 1024; // 5MB
+    private const int maxTextSize = 5 * 1024 * 1024; // 5MB
+
+    private string GetFileUploadText()
+    {
+        if (uploadedFile == null)
+            return "Click to upload PNG";
+
+        return $"{uploadedFile.Name} ({FormatFileSize(uploadedFile.Size)})";
+    }
+
+    private string GetTextSize()
+    {
+        var bytes = System.Text.Encoding.UTF8.GetByteCount(textPrompt);
+        return FormatFileSize(bytes);
+    }
+
+    private string FormatFileSize(long bytes)
+    {
+        if (bytes < 1024)
+            return $"{bytes} B";
+        else if (bytes < 1024 * 1024)
+            return $"{bytes / 1024.0:F1} KB";
+        else
+            return $"{bytes / (1024.0 * 1024.0):F2} MB";
+    }
+
+    private bool CanProcess()
+    {
+        if (uploadedFile == null || string.IsNullOrWhiteSpace(textPrompt) || isProcessing)
+            return false;
+
+        if (uploadedFile.Size > maxFileSize)
+            return false;
+
+        var textBytes = System.Text.Encoding.UTF8.GetByteCount(textPrompt);
+        if (textBytes > maxTextSize)
+            return false;
+
+        return true;
+    }
 
     private void HandleFileSelected(InputFileChangeEventArgs e)
     {
         uploadedFile = e.File;
+        originalImageData = null;
         processedImageData = null;
+        originalMetadata = null;
+        modifiedMetadata = null;
         base64Excerpt = null;
         errorMessage = null;
+        showBase64 = false;
+
+        if (uploadedFile.Size > maxFileSize)
+        {
+            errorMessage = $"File size ({FormatFileSize(uploadedFile.Size)}) exceeds maximum allowed size of 5MB";
+            uploadedFile = null;
+        }
+    }
+
+    private void HandleTextInput(ChangeEventArgs e)
+    {
+        var newText = e.Value?.ToString() ?? "";
+        var bytes = System.Text.Encoding.UTF8.GetByteCount(newText);
+
+        if (bytes > maxTextSize)
+        {
+            errorMessage = "Text size exceeds maximum allowed size of 5MB";
+        }
+        else
+        {
+            errorMessage = null;
+        }
+    }
+
+    private void ToggleBase64()
+    {
+        showBase64 = !showBase64;
+    }
+
+    private (int width, int height) GetImageDimensions(byte[] pngData)
+    {
+        // PNG IHDR chunk starts at byte 16 (after signature and IHDR chunk header)
+        // Width is 4 bytes at offset 16, height is 4 bytes at offset 20
+        if (pngData.Length < 24)
+            return (0, 0);
+
+        int width = (pngData[16] << 24) | (pngData[17] << 16) | (pngData[18] << 8) | pngData[19];
+        int height = (pngData[20] << 24) | (pngData[21] << 16) | (pngData[22] << 8) | pngData[23];
+
+        return (width, height);
+    }
+
+    private string FormatBase64WithLineBreaks(string base64)
+    {
+        // Format base64 at 76 characters per line (RFC 2045 standard for email)
+        const int lineLength = 76;
+        var result = new System.Text.StringBuilder();
+
+        for (int i = 0; i < base64.Length; i += lineLength)
+        {
+            int length = Math.Min(lineLength, base64.Length - i);
+            result.AppendLine(base64.Substring(i, length));
+        }
+
+        return result.ToString();
     }
 
     private async Task ProcessImage()
@@ -82,8 +651,23 @@
 
         try
         {
+            // Validate file size
+            if (uploadedFile.Size > maxFileSize)
+            {
+                errorMessage = $"File size ({FormatFileSize(uploadedFile.Size)}) exceeds maximum allowed size of 5MB";
+                return;
+            }
+
+            // Validate text size
+            var textBytes = System.Text.Encoding.UTF8.GetByteCount(textPrompt);
+            if (textBytes > maxTextSize)
+            {
+                errorMessage = "Text size exceeds maximum allowed size of 5MB";
+                return;
+            }
+
             // Read the uploaded PNG
-            using var stream = uploadedFile.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024); // 10MB max
+            using var stream = uploadedFile.OpenReadStream(maxAllowedSize: maxFileSize);
             using var memoryStream = new MemoryStream();
             await stream.CopyToAsync(memoryStream);
             byte[] pngData = memoryStream.ToArray();
@@ -91,9 +675,17 @@
             // Validate PNG
             if (!PngTextEmbedder.IsPng(pngData))
             {
-                errorMessage = "Invalid PNG file";
+                errorMessage = "Invalid PNG file. Please upload a valid PNG image.";
                 return;
             }
+
+            // Store original image
+            string originalBase64 = Convert.ToBase64String(pngData);
+            originalImageData = $"data:image/png;base64,{originalBase64}";
+
+            // Get original image dimensions
+            var (origWidth, origHeight) = GetImageDimensions(pngData);
+            originalMetadata = $"{origWidth} × {origHeight} • {pngData.Length:N0} bytes";
 
             // Modify PNG to include the text in base64
             byte[] modifiedPng = PngTextEmbedder.EmbedTextInPng(pngData, textPrompt);
@@ -102,25 +694,29 @@
             string base64 = Convert.ToBase64String(modifiedPng);
             processedImageData = $"data:image/png;base64,{base64}";
 
+            // Get modified image dimensions
+            var (modWidth, modHeight) = GetImageDimensions(modifiedPng);
+            modifiedMetadata = $"{modWidth} × {modHeight} • {modifiedPng.Length:N0} bytes";
+
+            // Format base64 at 76 characters per line
+            base64Excerpt = FormatBase64WithLineBreaks(base64);
+
             // Get normalized lines to search for in base64
             var normalizedLines = PngTextEmbedder.NormalizePrompt(textPrompt);
             if (normalizedLines.Count > 0)
             {
-                // Search for the first line in the base64 output
-                base64Excerpt = PngTextEmbedder.FindTextInBase64(base64, normalizedLines[0]);
-                if (base64Excerpt == null)
+                // Highlight the embedded text in the base64 output
+                var searchResult = PngTextEmbedder.FindTextInBase64(base64, normalizedLines[0]);
+                if (searchResult != null)
                 {
-                    base64Excerpt = "Text not found in base64 output";
+                    // Replace the excerpt with highlighted version
+                    base64Excerpt = searchResult;
                 }
-            }
-            else
-            {
-                base64Excerpt = "No text to embed";
             }
         }
         catch (Exception ex)
         {
-            errorMessage = $"Error: {ex.Message}";
+            errorMessage = $"Error processing image: {ex.Message}";
         }
         finally
         {
