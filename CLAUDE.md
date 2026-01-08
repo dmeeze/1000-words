@@ -4,7 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Blazor WebAssembly application that embeds text into PNG files such that the text appears verbatim in the base64-encoded output. For example, entering "Hello World" will produce a modified PNG whose base64 encoding contains the literal string "Hello+World+".
+Application that embeds text into PNG files such that the text appears verbatim in the base64-encoded output with proper line layout. Text is displayed at standard 76-character base64 line boundaries, with each input line appearing on its own line in the base64 output. For example, entering "CLI Test\nMessage" will produce a modified PNG where each line appears at the start of a base64 line.
+
+### Projects
+
+- **Llm64** - Blazor WebAssembly application with web UI
+- **Llm64.Cli** - Command-line interface
+- **Llm64.Tests** - Unit tests
 
 ## Build & Test Commands
 
@@ -12,9 +18,12 @@ Blazor WebAssembly application that embeds text into PNG files such that the tex
 # Build entire solution
 dotnet build
 
-# Run Blazor WASM app (from Llm64/ directory)
-dotnet run
-dotnet watch  # with hot reload
+# Run Blazor WASM app
+dotnet run --project Llm64/Llm64.csproj
+dotnet watch --project Llm64/Llm64.csproj  # with hot reload
+
+# Run CLI
+dotnet run --project Llm64.Cli/Llm64.Cli.csproj -- -i input.png -o output.png -m "message"
 
 # Run all tests
 dotnet test
@@ -32,47 +41,67 @@ dotnet test --logger "console;verbosity=detailed"
 
 Static utility class that handles all PNG manipulation logic. Key methods:
 
-1. **`NormalizePrompt(string prompt)`** - Normalizes user input:
-   - Spaces → `+`
-   - Newlines → `/`
+1. **`NormalizePrompt(string prompt)`** - Normalizes user input and returns `List<string>`:
+   - Preserves newlines as separate list entries (multi-line support)
+   - Spaces → `+` within each line
    - Filters to valid base64 chars only (A-Z, a-z, 0-9, +, /, =)
-   - **Critical**: Auto-pads with `+` to ensure length % 4 == 0 (prevents `=` padding corruption)
+   - Returns list of normalized lines (empty lines preserved)
 
-2. **`EmbedTextInPng(byte[] pngData, string text)`** - Main embedding logic:
+2. **`ProcessLinesForEmbedding(List<string> lines)`** - Processes normalized lines for embedding:
+   - Pads each line to exactly 76 characters (standard base64 line width)
+   - Wraps lines longer than 76 characters to multiple lines
+   - Empty lines become full lines of `+` padding
+   - Returns list of 76-character strings ready for embedding
+
+3. **`EmbedTextInPng(byte[] pngData, string text)`** - Main embedding logic:
    - Validates PNG signature
-   - Calculates byte alignment (base64: 3 bytes → 4 chars)
-   - Calls `ManuallyDecodeBase64()` to convert text to raw bytes
-   - Inserts custom "dATa" ancillary chunk before IEND
+   - Finds IHDR chunk position
+   - Normalizes input text and processes lines for 76-char layout
+   - Calls `EmbedTextWithOverwrite()` (insert empty buffer, then overwrite)
+   - Inserts custom "sLOp" ancillary chunk after IHDR
    - Returns modified PNG bytes
 
-3. **`ManuallyDecodeBase64(string text)`** - Custom base64 decoder:
+4. **`ManuallyDecodeBase64(string text)`** - Custom base64 decoder:
    - Converts each base64 char to 6 bits
    - Packs bits into bytes (8 bits per byte)
    - **Why manual?** Standard `Convert.FromBase64String()` with `=` padding corrupts the last byte during round-trip encoding
 
 ### PNG Chunk Structure
 
-Uses custom ancillary chunk type **"dATa"** (lowercase 'd' = safe-to-copy):
-- Inserted before IEND chunk
-- Contains raw bytes that will encode to target text
-- Includes proper CRC32 checksum for PNG validity
-- Byte alignment padding (null bytes) prepended to align on 3-byte boundary
+Uses custom ancillary chunk type **"sLOP"** (lowercase 's' = ancillary, uppercase 'P' = unsafe-to-copy):
+- Inserted after IHDR chunk (beginning of file)
+- Contains single copy of text at calculated alignment
+- Includes CRC32 checksum for PNG validity
+- Padded with 0xFB 0xEF 0xBE pattern (encodes to `++++` in base64)
+- **Unsafe-to-copy:** The 'P' (uppercase) indicates this chunk cannot be safely copied by PNG editors that don't recognize it, because the exact byte position is critical for 76-char line alignment
 
-### Byte Alignment Critical Detail
+### Embedding Implementation Details
 
-The position where data bytes start in the PNG affects base64 encoding:
-```
-Position % 3 == 0: Perfect alignment, no offset needed
-Position % 3 == 1: Need 2 padding bytes
-Position % 3 == 2: Need 1 padding byte
-```
+**`EmbedTextWithOverwrite()` Method:**
+1. Ensures text length is multiple of 4 for proper base64 encoding
+2. Decodes text to raw bytes using `ManuallyDecodeBase64()`
+3. Calculates padding needed to align to 57-byte boundary (76 base64 chars)
+4. Adds one full line (57 bytes) of padding before and after text
+5. Creates empty buffer and builds sLOp chunk
+6. Inserts chunk into PNG
+7. Overwrites buffer with alignment-aware padding + raw bytes
+8. Recalculates CRC32 for modified chunk
 
-The `CreateDataChunk()` method calculates:
-```csharp
-int actualDataPosition = insertPosition + 8;  // +4 length, +4 type
-int alignment = actualDataPosition % 3;
-int paddingNeeded = alignment == 0 ? 0 : (3 - alignment);
-```
+**57-Byte Boundary Alignment:**
+- Standard base64 wraps at 76 characters = 57 bytes (76 ÷ 4 × 3 = 57)
+- Text is aligned so each processed line starts at a 57-byte boundary
+- This ensures each text line appears at the start of a base64 line in output
+
+**Key Helper Methods:**
+- `GeneratePaddingForAlignment(int alignment, int byteCount)`:
+  - Uses pattern 0xFB 0xEF 0xBE repeated (encodes to `++++`)
+  - Adds null byte prefix to align pattern to 3-byte boundaries
+  - Padding appears as `++++` in base64 output at any byte alignment
+- `ManuallyDecodeBase64(string text)`:
+  - Converts base64 text to raw bytes
+  - Standard .NET `Convert.FromBase64String()` corrupts bytes during round-trip when `=` padding is present
+- `BuildChunk(string chunkType, byte[] data)`:
+  - Creates PNG chunk with proper structure: length + type + data + CRC32
 
 ### UI Layer (`/Llm64/Pages/Index.razor`)
 
@@ -83,33 +112,72 @@ Simple Blazor component:
 - Displays modified image with download link
 - Shows base64 excerpt with embedded text highlighted
 
-## Important: Text Padding Behavior
+### CLI Application (`/Llm64.Cli/Program.cs`)
 
-**All normalized text is padded to length % 4 == 0 using `+` characters.**
+Command-line interface:
+- Parses command-line arguments: `-i` (input), `-o` (output), `-m` (message)
+- Validates input file exists and is valid PNG
+- Calls `PngTextEmbedder.NormalizePrompt()` and `PngTextEmbedder.EmbedTextInPng()`
+- Writes output PNG to specified path
+- Returns exit code 0 on success, 1 on error
+
+## Text Padding Behavior
+
+### Line Processing
+Each input line is normalized and then padded to exactly 76 characters:
 
 Examples:
-- `"Hello World"` → `"Hello+World+"` (11 → 12 chars)
-- `"ABCDE"` → `"ABCDE+++"` (5 → 8 chars)
-- `"Test"` → `"Test"` (already 4 chars)
+- `"Hello World"` → `"Hello+World"` → padded to 76 chars
+- `"CLI Test\nMessage"` → Two lines: `"CLI+Test"` (padded to 76) and `"Message"` (padded to 76)
+- Lines longer than 76 chars are wrapped to multiple 76-char lines
+- Empty lines become full lines of `+` padding
 
-This padding is **required** to avoid base64 `=` padding corruption during decode/re-encode cycles.
+### Base64 Alignment
+- Each 76-character line encodes to exactly one 76-character base64 line
+- Text is aligned to 57-byte boundaries in the PNG (76 ÷ 4 × 3 = 57)
+- This ensures each text line appears at the start of a base64 output line
+
+### Example Output
+Input: `"CLI Test\nMessage"`
+
+Base64 output (76 chars per line):
+```
+iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAIAAAD/gAIDAAAA9HNMT3AA++++++++++++++++++++
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+CLI+Test++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Message+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+```
 
 ## Test Coverage (`/Llm64.Tests/PngTextEmbedderTests.cs`)
 
-34 tests covering:
+37 tests covering:
 - PNG validation
-- Text normalization and auto-padding
+- Text normalization with line preservation
+- Multi-line text embedding
+- 76-character line boundary alignment
 - Byte alignment verification across different positions
 - Base64 embedding correctness
 - PNG structure preservation
+- Padding patterns (`++++` vs `7777`)
 - Edge cases (empty arrays, invalid PNGs, various text lengths)
 
-Critical test: `EmbedTextInPng_TextAppearsInBase64_AtCorrectAlignment` verifies that normalized text appears verbatim in base64 output.
+Key tests:
+- `EmbedTextInPng_TextAppearsInBase64_AtCorrectAlignment` verifies that normalized text appears verbatim in base64 output
+- `EmbedTextInPng_LinesAppearAt76CharBoundaries` verifies that each text line appears at the start of a 76-char base64 line
+- `EmbedTextInPng_WithMultiLineText_WorksCorrectly` verifies multi-line text handling
 
 ## Troubleshooting
 
-If embedded text appears corrupted in base64 output (e.g., "Hello+worlf" instead of "Hello+world+"):
-1. Verify text was padded to length % 4 == 0
-2. Check that `ManuallyDecodeBase64()` is being used (not `Convert.FromBase64String()`)
-3. Confirm byte alignment padding is calculated correctly
+### Text Not Appearing at Line Boundaries
+If embedded text doesn't appear at the start of base64 lines:
+1. Verify the chunk is at the correct position (after IHDR)
+2. Check that 57-byte boundary alignment is calculated correctly
+3. Ensure `ProcessLinesForEmbedding()` is padding lines to exactly 76 characters
+4. Verify the sLOP chunk hasn't been moved or modified by other tools
+
+### Text Appears Corrupted
+If embedded text appears corrupted in base64 output:
+1. Check that `ManuallyDecodeBase64()` is being used (not `Convert.FromBase64String()`)
+2. Confirm byte alignment padding is calculated correctly for base64 encoding
+3. Verify the PNG hasn't been modified by tools that don't preserve the sLOP chunk
 4. Add debug test to verify round-trip: text → decode → encode → verify

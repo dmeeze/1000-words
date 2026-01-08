@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Runtime.InteropServices.JavaScript;
 using System.Text;
 
 namespace Llm64.Services;
@@ -5,42 +7,75 @@ namespace Llm64.Services;
 public class PngTextEmbedder
 {
     private static readonly byte[] PngSignature = { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
-
+    private const string Base64Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+    const int Base64DisplayLineWidth = 76;
+    private const string PngHeaderChunkType = "IHDR";
+    private static readonly HashSet<char> Base64CharSet = new(Base64Chars);
+    
     public static bool IsPng(byte[] data)
     {
         if (data.Length < 8) return false;
-        return data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47 &&
-               data[4] == 0x0D && data[5] == 0x0A && data[6] == 0x1A && data[7] == 0x0A;
+        return data.Take(8).SequenceEqual(PngSignature);
+    }
+    
+    public static List<string> NormalizePrompt(string prompt)
+    {
+        var lines = new List<string>();
+
+        // Split by newlines (preserve line breaks)
+        var inputLines = prompt.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+
+        foreach (var line in inputLines)
+        {
+            // Normalize each line: keep only valid base64 characters
+            var chars = new List<char>();
+            foreach (char c in line)
+            {
+                char? appendChar = c switch
+                {
+                    _ when char.IsWhiteSpace(c) => '+', // whitespace to plus
+                    _ when Base64CharSet.Contains(c) => c,
+                    _ => null
+                };
+
+                if (appendChar.HasValue) chars.Add(appendChar.Value);
+            }
+
+            lines.Add(new string(chars.ToArray()));
+        }
+
+        return lines;
     }
 
-    public static string NormalizePrompt(string prompt)
+    private static string ProcessLinesForEmbedding(List<string> lines)
     {
-        // Replace spaces with +, newlines with /
-        string normalized = prompt.Replace("\r\n", "/").Replace("\n", "/").Replace("\r", "/").Replace(" ", "+");
-
-        // Keep only valid base64 characters: A-Z, a-z, 0-9, +, /, =
         var sb = new StringBuilder();
-        foreach (char c in normalized)
+        
+        foreach (var line in lines)
         {
-            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-                (c >= '0' && c <= '9') || c == '+' || c == '/' || c == '=')
+            if (line.Length == 0)
             {
-                sb.Append(c);
+                // Empty line becomes a line of padding
+                sb.Append(new string('+', Base64DisplayLineWidth));
+            }
+            else if (line.Length <= Base64DisplayLineWidth)
+            {
+                // Pad to 76 chars
+                sb.Append(line.PadRight(Base64DisplayLineWidth, '+'));
+            }
+            else
+            {
+                // Wrap
+                for (int i = 0; i < line.Length; i += Base64DisplayLineWidth)
+                {
+                    int length = Math.Min(Base64DisplayLineWidth, line.Length - i);
+                    string segment = line.Substring(i, length);
+                    sb.Append(segment.PadRight(Base64DisplayLineWidth, '+'));
+                }
             }
         }
 
-        string result = sb.ToString();
-
-        // Pad with '+' (space) to make length % 4 == 0
-        // This avoids issues with '=' padding affecting the last byte during decode/encode
-        int mod = result.Length % 4;
-        if (mod != 0)
-        {
-            // Add enough '+' chars to make length % 4 == 0
-            result = result + new string('+', 4 - mod);
-        }
-
-        return result;
+        return sb.ToString();
     }
 
     public static byte[] EmbedTextInPng(byte[] pngData, string text)
@@ -50,27 +85,21 @@ public class PngTextEmbedder
             throw new ArgumentException("Invalid PNG file", nameof(pngData));
         }
 
-        // Find IEND chunk (should be at the end)
-        int iendIndex = FindChunk(pngData, "IEND");
-        if (iendIndex == -1)
+        // Find IHDR chunk (always starts at byte 8 after PNG signature)
+        int ihdrIndex = FindChunk(pngData, PngHeaderChunkType);
+        if (ihdrIndex == -1)
         {
-            throw new Exception("Invalid PNG: IEND chunk not found");
+            throw new Exception("Invalid PNG: Header chunk not found");
         }
 
-        // Calculate byte alignment - we need to know where our data will start
-        // to ensure it aligns properly for base64 encoding (3 bytes -> 4 chars)
-        int dataStartPosition = iendIndex;
+        // IHDR chunk structure: length(4) + type(4) + data(13) + CRC(4) = 25 bytes
+        int insertPosition = ihdrIndex + 25;
 
-        // Create custom chunk with our payload, considering byte alignment
-        byte[] dataChunk = CreateDataChunk(text, dataStartPosition);
-
-        // Insert the chunk before IEND
-        byte[] result = new byte[pngData.Length + dataChunk.Length];
-        Array.Copy(pngData, 0, result, 0, iendIndex);
-        Array.Copy(dataChunk, 0, result, iendIndex, dataChunk.Length);
-        Array.Copy(pngData, iendIndex, result, iendIndex + dataChunk.Length, pngData.Length - iendIndex);
-
-        return result;
+        // Normalize and process lines for proper base64 layout
+        var normalizedLines = NormalizePrompt(text);
+        var embeddedText = ProcessLinesForEmbedding(normalizedLines);
+        // Insert empty buffer, then overwrite with correct bytes
+        return EmbedTextWithOverwrite(pngData, embeddedText, insertPosition);
     }
 
     private static int FindChunk(byte[] data, string chunkType)
@@ -87,108 +116,144 @@ public class PngTextEmbedder
         return -1;
     }
 
-    private static byte[] CreateDataChunk(string text, int insertPosition)
+    private static byte[] GeneratePaddingForAlignment(int alignment, int byteCount)
     {
-        // Calculate where our data bytes will actually start in the PNG file
+        // Generate padding that encodes to "+++..." in base64 at the given alignment
+        // alignment: 0, 1, or 2 (position % 3)
+        // byteCount: how many bytes of padding to generate
+
+        // The pattern 0xFB 0xEF 0xBE encodes to "++++" ONLY at 3-byte boundaries
+        // Precomputed initial bytes for each alignment case
+        byte[] pattern = new byte[] { 0xFB, 0xEF, 0xBE };
+        
+
+        var result = alignment switch
+        {
+            0 => new List<byte>(),
+            1 => new List<byte>([0x00, 0x00]),
+            2 => new List<byte>([0x00]),
+            _ => throw new InvalidOperationException()
+        };
+
+        // Now add the repeating pattern
+        int remainingBytes = byteCount - result.Count;
+        
+        for (int i = 0; i < remainingBytes; i += 3)
+        {
+            int copyLen = Math.Min(3, remainingBytes - i);
+            for (int j = 0; j < copyLen; j++)
+            {
+                result.Add(pattern[j]);
+            }
+        }
+
+        return result.ToArray();
+    }
+
+    private static byte[] EmbedTextWithOverwrite(byte[] pngData, string text, int insertPosition)
+    {
+        // Ensure text length is a multiple of 4 for proper base64 encoding
+        int mod = text.Length % 4;
+        if (mod != 0)
+        {
+            text = text + new string('+', 4 - mod);
+        }
+
+        // Decode text to raw bytes
+        byte[] rawBytes = ManuallyDecodeBase64(text);
+
+        // Calculate where the buffer will start in the PNG
         // Chunk structure: length(4) + type(4) + data(N) + CRC(4)
-        // So our data starts at: insertPosition + 4 (length) + 4 (type) = insertPosition + 8
-        int actualDataPosition = insertPosition + 8;
+        int bufferStartInPng = insertPosition + 8; // After length and type fields
 
-        // Base64 encodes 3 bytes into 4 characters
-        // We need to ensure our data aligns on a 3-byte boundary for the text to appear correctly
-        int alignment = actualDataPosition % 3;
-        int paddingNeeded = alignment == 0 ? 0 : (3 - alignment);
+        // Calculate padding needed to align to 57-byte boundary
+        // Standard base64 wraps at 76 chars = 57 bytes
+        int currentPosition = bufferStartInPng;
+        int paddingToLineStart = (57 - (currentPosition % 57)) % 57;
 
-        // The actual data will start at this aligned position
-        int alignedPosition = actualDataPosition + paddingNeeded;
+        // Additional padding: one full line (57 bytes) before text for visual buffer
+        int additionalPaddingBefore = 57;
+        int totalPaddingBefore = paddingToLineStart + additionalPaddingBefore;
 
-        // Now we need to compute what bytes will encode to our target text
-        // Base64: 3 bytes -> 4 chars, so we need (text.length * 3 / 4) bytes
-        byte[] rawBytes = DecodeBase64ForAlignment(text, alignedPosition % 3);
+        // Padding after text: one full line (57 bytes)
+        int paddingAfter = 57;
 
-        // Prepend padding bytes if needed
-        byte[] alignedData = new byte[paddingNeeded + rawBytes.Length];
-        // Use null bytes for padding
-        Array.Copy(rawBytes, 0, alignedData, paddingNeeded, rawBytes.Length);
+        // Calculate total buffer size
+        int totalBufferSize = totalPaddingBefore + rawBytes.Length + paddingAfter;
 
-        // Use a custom ancillary chunk "dATa" to embed arbitrary bytes
-        // Lowercase first letter = ancillary chunk (safe to copy, can be ignored by readers)
-        string chunkType = "dATa";
+        // Create empty buffer (all zeros)
+        byte[] emptyBuffer = new byte[totalBufferSize];
 
-        // Build complete chunk: length + type + data + CRC
+        // Build the chunk with empty buffer
+        byte[] chunk = BuildChunk("sLOP", emptyBuffer);
+
+        // Insert the chunk into the PNG
+        byte[] tempPng = new byte[pngData.Length + chunk.Length];
+        Array.Copy(pngData, 0, tempPng, 0, insertPosition);
+        Array.Copy(chunk, 0, tempPng, insertPosition, chunk.Length);
+        Array.Copy(pngData, insertPosition, tempPng, insertPosition + chunk.Length, pngData.Length - insertPosition);
+
+        // Now overwrite the buffer with actual content
+        int writePosition = bufferStartInPng;
+
+        // Generate padding before text (alignment-aware for base64)
+        byte[] paddingBeforeBytes = GeneratePaddingForAlignment(writePosition % 3, totalPaddingBefore);
+        Array.Copy(paddingBeforeBytes, 0, tempPng, writePosition, paddingBeforeBytes.Length);
+        writePosition += paddingBeforeBytes.Length;
+
+        // Write the raw bytes
+        Array.Copy(rawBytes, 0, tempPng, writePosition, rawBytes.Length);
+        writePosition += rawBytes.Length;
+
+        // Generate padding after text (alignment-aware for base64)
+        byte[] paddingAfterBytes = GeneratePaddingForAlignment(writePosition % 3, paddingAfter);
+        Array.Copy(paddingAfterBytes, 0, tempPng, writePosition, paddingAfterBytes.Length);
+
+        // Recalculate CRC for the modified chunk
+        int crcPosition = insertPosition + 8 + totalBufferSize; // After length, type, and data
+        byte[] typeAndData = new byte[4 + totalBufferSize];
+        Array.Copy(Encoding.ASCII.GetBytes("sLOP"), 0, typeAndData, 0, 4);
+        Array.Copy(tempPng, bufferStartInPng, typeAndData, 4, totalBufferSize);
+        uint crc = CalculateCrc32(typeAndData);
+        byte[] crcBytes = BitConverter.GetBytes(crc).Reverse().ToArray();
+        Array.Copy(crcBytes, 0, tempPng, crcPosition, 4);
+
+        return tempPng;
+    }
+
+    private static byte[] BuildChunk(string chunkType, byte[] data)
+    {
         using var ms = new MemoryStream();
         using var writer = new BinaryWriter(ms);
 
         // Length (big-endian)
-        writer.Write(BitConverter.GetBytes(alignedData.Length).Reverse().ToArray());
+        writer.Write(BitConverter.GetBytes(data.Length).Reverse().ToArray());
 
         // Type
         writer.Write(Encoding.ASCII.GetBytes(chunkType));
 
-        // Data (raw bytes with padding)
-        writer.Write(alignedData);
+        // Data
+        writer.Write(data);
 
         // CRC32 (calculated over type + data)
-        byte[] typeAndData = new byte[4 + alignedData.Length];
+        byte[] typeAndData = new byte[4 + data.Length];
         Array.Copy(Encoding.ASCII.GetBytes(chunkType), 0, typeAndData, 0, 4);
-        Array.Copy(alignedData, 0, typeAndData, 4, alignedData.Length);
+        Array.Copy(data, 0, typeAndData, 4, data.Length);
         uint crc = CalculateCrc32(typeAndData);
         writer.Write(BitConverter.GetBytes(crc).Reverse().ToArray());
 
         return ms.ToArray();
     }
 
-    private static byte[] DecodeBase64ForAlignment(string text, int alignment)
-    {
-        // Since we're inserting with proper alignment (alignment should be 0),
-        // we can decode directly. However, we need to handle the case where
-        // the text doesn't decode perfectly.
-
-        // Try to decode as valid base64
-        // Add padding if needed
-        string paddedText = text;
-        int mod = text.Length % 4;
-        if (mod != 0)
-        {
-            paddedText = text + new string('=', 4 - mod);
-        }
-
-        try
-        {
-            // Attempt to decode
-            byte[] decoded = Convert.FromBase64String(paddedText);
-
-            // Verify by encoding back and checking if it matches
-            string reencoded = Convert.ToBase64String(decoded);
-
-            // Check if the target text appears in the re-encoded version
-            if (reencoded.StartsWith(text) || reencoded.Contains(text))
-            {
-                return decoded;
-            }
-
-            // If not, we need to manually construct the bytes
-            return ManuallyDecodeBase64(text);
-        }
-        catch
-        {
-            // Decoding failed, manually construct bytes
-            return ManuallyDecodeBase64(text);
-        }
-    }
-
     private static byte[] ManuallyDecodeBase64(string text)
     {
-        // Base64 alphabet
-        const string base64Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
         // Convert each character to its 6-bit value
         var bits = new List<bool>();
         foreach (char c in text)
         {
             if (c == '=' || c == ' ') continue; // Skip padding and spaces
 
-            int value = base64Chars.IndexOf(c);
+            int value = Base64Chars.IndexOf(c);
             if (value == -1)
             {
                 // Invalid base64 character, skip or use 0

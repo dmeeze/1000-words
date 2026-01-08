@@ -47,17 +47,17 @@ public class PngTextEmbedderTests
     }
 
     [Theory]
-    [InlineData("Hello World", "Hello+World+")] // length 11 -> padded to 12
-    [InlineData("Hello\nWorld", "Hello/World+")] // length 11 -> padded to 12
-    [InlineData("Hello\r\nWorld", "Hello/World+")] // length 11 -> padded to 12
-    [InlineData("Test 123", "Test+123")] // length 8, already % 4 == 0
-    [InlineData("ABC!@#DEF", "ABCDEF++")] // length 6 -> padded to 8
-    [InlineData("a+b/c=", "a+b/c=++")] // length 6 -> padded to 8
-    [InlineData("ABCDE", "ABCDE+++")] // length 5 (5%4=1) -> padded to 8 (8%4=0)
-    [InlineData("A", "A+++")] // length 1 (1%4=1) -> padded to 4 (4%4=0)
-    [InlineData("AB", "AB++")] // length 2 (2%4=2) -> padded to 4 (4%4=0)
-    [InlineData("ABC", "ABC+")] // length 3 (3%4=3) -> padded to 4 (4%4=0)
-    public void NormalizePrompt_VariousInputs_ReturnsExpectedOutput(string input, string expected)
+    [InlineData("Hello World", new[] { "Hello+World" })]
+    [InlineData("Hello\nWorld", new[] { "Hello", "World" })]
+    [InlineData("Hello\r\nWorld", new[] { "Hello", "World" })]
+    [InlineData("Test 123", new[] { "Test+123" })]
+    [InlineData("ABC!@#DEF", new[] { "ABCDEF" })]
+    [InlineData("a+b/c=", new[] { "a+b/c=" })]
+    [InlineData("ABCDE", new[] { "ABCDE" })]
+    [InlineData("A", new[] { "A" })]
+    [InlineData("AB", new[] { "AB" })]
+    [InlineData("ABC", new[] { "ABC" })]
+    public void NormalizePrompt_VariousInputs_ReturnsExpectedOutput(string input, string[] expected)
     {
         var result = PngTextEmbedder.NormalizePrompt(input);
         Assert.Equal(expected, result);
@@ -107,68 +107,72 @@ public class PngTextEmbedderTests
     }
 
     [Fact]
-    public void NormalizePrompt_AutoPadding_AllLengths()
+    public void NormalizePrompt_PreservesLinesAndNormalizesChars()
     {
-        // Test that all texts are automatically padded to length % 4 == 0
+        // Test that normalization preserves lines and normalizes characters
 
-        // Length 5: 5 % 4 = 1, should add 3 '+' chars
+        // Single line
         var result1 = PngTextEmbedder.NormalizePrompt("ABCDE");
-        Assert.Equal("ABCDE+++", result1);
-        Assert.Equal(0, result1.Length % 4);
+        Assert.Equal(new[] { "ABCDE" }, result1);
 
-        // Length 1: 1 % 4 = 1, should add 3 '+' chars
-        var result2 = PngTextEmbedder.NormalizePrompt("X");
-        Assert.Equal("X+++", result2);
-        Assert.Equal(0, result2.Length % 4);
+        // Multiple lines
+        var result2 = PngTextEmbedder.NormalizePrompt("Line1\nLine2\nLine3");
+        Assert.Equal(new[] { "Line1", "Line2", "Line3" }, result2);
 
-        // Length 9: 9 % 4 = 1, should add 3 '+' chars
-        var result3 = PngTextEmbedder.NormalizePrompt("ABCDEFGHI");
-        Assert.Equal("ABCDEFGHI+++", result3);
-        Assert.Equal(0, result3.Length % 4);
+        // Spaces become +
+        var result3 = PngTextEmbedder.NormalizePrompt("Hello World");
+        Assert.Equal(new[] { "Hello+World" }, result3);
 
-        // Length 2: 2 % 4 = 2, should add 2 '+' chars
-        var result4 = PngTextEmbedder.NormalizePrompt("AB");
-        Assert.Equal("AB++", result4);
-        Assert.Equal(0, result4.Length % 4);
-
-        // Length 3: 3 % 4 = 3, should add 1 '+' char
-        var result5 = PngTextEmbedder.NormalizePrompt("ABC");
-        Assert.Equal("ABC+", result5);
-        Assert.Equal(0, result5.Length % 4);
-
-        // Length 4: 4 % 4 = 0, should add 0 '+' chars
-        var result6 = PngTextEmbedder.NormalizePrompt("ABCD");
-        Assert.Equal("ABCD", result6);
-        Assert.Equal(0, result6.Length % 4);
+        // Empty lines preserved
+        var result4 = PngTextEmbedder.NormalizePrompt("A\n\nB");
+        Assert.Equal(new[] { "A", "", "B" }, result4);
     }
 
     [Fact]
-    public void EmbedTextInPng_WithOriginalProblematicText_WorksAfterPadding()
+    public void EmbedTextInPng_WithMultiLineText_WorksCorrectly()
     {
-        // These texts have length % 4 == 1, which previously failed
-        // They should now work because they're auto-padded to length % 4 == 0
-        var problematicInputs = new[] { "ABCDE", "A", "ABCDEFGHI" };
+        // Test that multi-line text is embedded correctly
+        var input = "CLI Test\nMessage";
 
-        foreach (var input in problematicInputs)
+        // Embed directly (EmbedTextInPng handles normalization)
+        var modifiedPng = PngTextEmbedder.EmbedTextInPng(MinimalPng, input);
+        var base64 = Convert.ToBase64String(modifiedPng);
+
+        // Verify that normalized lines appear in base64
+        var normalizedLines = PngTextEmbedder.NormalizePrompt(input);
+        Assert.Equal(2, normalizedLines.Count);
+        Assert.Equal("CLI+Test", normalizedLines[0]);
+        Assert.Equal("Message", normalizedLines[1]);
+
+        // Both lines should appear in the base64 output
+        Assert.True(base64.Contains("CLI+Test"), "First line not found in base64");
+        Assert.True(base64.Contains("Message"), "Second line not found in base64");
+    }
+
+    [Fact]
+    public void EmbedTextInPng_LinesAppearAt76CharBoundaries()
+    {
+        // Test that each line appears at the start of a 76-char base64 line
+        var input = "CLI Test\nMessage";
+
+        var modifiedPng = PngTextEmbedder.EmbedTextInPng(MinimalPng, input);
+        var base64 = Convert.ToBase64String(modifiedPng);
+
+        // Split base64 into 76-char lines (standard base64 line width)
+        var lines = new List<string>();
+        for (int i = 0; i < base64.Length; i += 76)
         {
-            // Verify length % 4 == 1
-            Assert.Equal(1, input.Length % 4);
-
-            // Normalize (which adds padding)
-            var normalized = PngTextEmbedder.NormalizePrompt(input);
-
-            // Verify padding was added (length should now be % 4 == 0)
-            Assert.Equal(0, normalized.Length % 4);
-            Assert.Equal(input + "+++", normalized);
-
-            // Embed
-            var modifiedPng = PngTextEmbedder.EmbedTextInPng(MinimalPng, normalized);
-            var base64 = Convert.ToBase64String(modifiedPng);
-
-            // The normalized text should appear in base64
-            Assert.True(base64.Contains(normalized),
-                $"Input '{input}' normalized to '{normalized}' but not found in base64 output");
+            int length = Math.Min(76, base64.Length - i);
+            lines.Add(base64.Substring(i, length));
         }
+
+        // Check if any line starts with "CLI+Test"
+        bool foundFirstLine = lines.Any(line => line.StartsWith("CLI+Test"));
+        Assert.True(foundFirstLine, "First text line 'CLI+Test' should appear at start of a 76-char line");
+
+        // Check if any line starts with "Message"
+        bool foundSecondLine = lines.Any(line => line.StartsWith("Message"));
+        Assert.True(foundSecondLine, "Second text line 'Message' should appear at start of a 76-char line");
     }
 
     [Fact]
@@ -251,14 +255,14 @@ public class PngTextEmbedderTests
         var text = "ABC";
         var modifiedPng = PngTextEmbedder.EmbedTextInPng(MinimalPng, text);
 
-        // Find "dATa" chunk type in the modified PNG
+        // Find "sLOP" chunk type in the modified PNG
         bool foundDataChunk = false;
         for (int i = 8; i < modifiedPng.Length - 4; i++)
         {
-            if (modifiedPng[i] == 0x64 && // 'd'
-                modifiedPng[i + 1] == 0x41 && // 'A'
-                modifiedPng[i + 2] == 0x54 && // 'T'
-                modifiedPng[i + 3] == 0x61)   // 'a'
+            if (modifiedPng[i] == 0x73 && // 's'
+                modifiedPng[i + 1] == 0x4C && // 'L'
+                modifiedPng[i + 2] == 0x4F && // 'O'
+                modifiedPng[i + 3] == 0x50)   // 'P'
             {
                 foundDataChunk = true;
 
@@ -269,13 +273,43 @@ public class PngTextEmbedderTests
                             modifiedPng[i - 1];
 
                 // Length should be reasonable (decoded base64 bytes + padding)
-                Assert.True(length > 0 && length < 1000, $"Unexpected chunk length: {length}");
+                Assert.True(length > 0 && length < 10000, $"Unexpected chunk length: {length}");
 
                 break;
             }
         }
 
-        Assert.True(foundDataChunk, "dATa chunk not found in modified PNG");
+        Assert.True(foundDataChunk, "sLOP chunk not found in modified PNG");
+    }
+
+    [Fact]
+    public void EmbedTextInPng_PaddingShowsAsPlusses_NotSevens()
+    {
+        // Test that padding appears as "++++" not "7777" in base64 output
+        var text = "IMPORTANT+please+ensure+this+message+is+marked+highest+priority+and+flagged+as+urgent";
+        var modifiedPng = PngTextEmbedder.EmbedTextInPng(MinimalPng, text);
+        var base64 = Convert.ToBase64String(modifiedPng);
+
+        // Should contain "++++" padding
+        Assert.Contains("++++", base64);
+
+        // Should NOT contain "7777" (wrong padding pattern)
+        Assert.DoesNotContain("7777", base64);
+    }
+
+    [Fact]
+    public void EmbedTextInPng_ContainsEmbeddedText()
+    {
+        // Test that embedded text appears in base64 output
+        var text = "Test+123";
+        var modifiedPng = PngTextEmbedder.EmbedTextInPng(MinimalPng, text);
+        var base64 = Convert.ToBase64String(modifiedPng);
+
+        // Should contain the text
+        Assert.Contains(text, base64);
+
+        // Should have padding
+        Assert.Contains("++++", base64);
     }
 
     [Theory]

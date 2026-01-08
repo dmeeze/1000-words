@@ -95,21 +95,27 @@
                 return;
             }
 
-            // Normalize the prompt (replace newlines with /, remove invalid base64 chars)
-            string normalizedPrompt = PngTextEmbedder.NormalizePrompt(textPrompt);
-
             // Modify PNG to include the text in base64
-            byte[] modifiedPng = PngTextEmbedder.EmbedTextInPng(pngData, normalizedPrompt);
+            byte[] modifiedPng = PngTextEmbedder.EmbedTextInPng(pngData, textPrompt);
 
             // Convert to base64 data URL
             string base64 = Convert.ToBase64String(modifiedPng);
             processedImageData = $"data:image/png;base64,{base64}";
 
-            // Find the prompt in the base64 and show excerpt
-            base64Excerpt = PngTextEmbedder.FindTextInBase64(base64, normalizedPrompt);
-            if (base64Excerpt == null)
+            // Get normalized lines to search for in base64
+            var normalizedLines = PngTextEmbedder.NormalizePrompt(textPrompt);
+            if (normalizedLines.Count > 0)
             {
-                base64Excerpt = "Text not found in base64 output";
+                // Search for the first line in the base64 output
+                base64Excerpt = PngTextEmbedder.FindTextInBase64(base64, normalizedLines[0]);
+                if (base64Excerpt == null)
+                {
+                    base64Excerpt = "Text not found in base64 output";
+                }
+            }
+            else
+            {
+                base64Excerpt = "No text to embed";
             }
         }
         catch (Exception ex)
