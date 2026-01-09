@@ -83,7 +83,7 @@ jobs:
         BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
         echo "Build timestamp: $BUILD_TIME"
 
-        dotnet publish Llm64/Llm64.csproj -c Release -o publish -p:BaseHref="${{ steps.vars.outputs.base_href }}"
+        dotnet publish Llm64.Wasm/Llm64.Wasm.csproj -c Release -o publish -p:BaseHref="${{ steps.vars.outputs.base_href }}"
 
         # Blazor WASM always publishes to wwwroot directly
         PUBLISH_PATH="publish/wwwroot"

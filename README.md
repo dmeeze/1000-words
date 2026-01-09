@@ -61,6 +61,17 @@ A web application that embeds text into PNG images at the base64 level, allowing
 - Minimal Blazor files: only Index.razor and _Imports.razor remain
 - Removed files: About.razor, App.razor, MainLayout.razor, app.css
 
+**Development vs Production Navigation:**
+- **In Development** (`dotnet run`): Blazor's dev server has SPA fallback behavior that routes all requests to index.html
+  - Typing `http://localhost:5161/about.html` directly in the browser will serve index.html (SPA behavior)
+  - However, clicking navigation links from the home page works correctly
+  - This is expected behavior for Blazor WASM development server
+- **In Production** (static hosting like S3, nginx, Apache): Both HTML pages work perfectly
+  - Direct navigation to `/about.html` works correctly
+  - All navigation links work correctly
+  - Tested with simple HTTP server: both pages return HTTP 200
+- **Recommendation**: For development, start at index.html and use the navigation links. For testing static file serving, use `dotnet publish` and serve from the publish/wwwroot directory with any static file server.
+
 ### Project Namespace Rename - Completed (2026-01-10)
 
 **Changes Implemented:**
