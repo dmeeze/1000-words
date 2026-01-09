@@ -1,4 +1,4 @@
-using Llm64.Services;
+using Llm64.Wasm.Services;
 
 namespace Llm64.Tests;
 

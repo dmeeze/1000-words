@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\Llm64\Llm64.csproj" />
+    <ProjectReference Include="..\Llm64.Wasm\Llm64.Wasm.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

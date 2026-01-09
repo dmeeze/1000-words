@@ -1,16 +1,6 @@
-@page "/"
-@using Llm64.Services
+@using Llm64.Wasm.Services
 
-<PageTitle>1000 Words</PageTitle>
-
-<div class="app-container">
-    <div class="hero">
-        <h1 class="title">1000 Words</h1>
-        <p class="subtitle">Make text show up when a PNG is shown in base64</p>
-        <p class="tagline">Because when a picture already has a thousand words... whats a few more?</p>
-    </div>
-
-    <div class="main-card">
+<div class="main-card">
         <div class="upload-section">
             <label class="file-upload-label">
                 <div class="file-upload-content">
@@ -109,53 +99,15 @@
                 </div>
             </div>
         }
-    </div>
 </div>
 
 <style>
-.app-container {
-    max-width: 900px;
-    margin: 0 auto;
-    padding: 2rem 1rem;
-}
-
-.hero {
-    text-align: center;
-    margin-bottom: 3rem;
-    animation: fadeInDown 0.8s ease-out;
-}
-
-.title {
-    font-size: 4rem;
-    font-weight: 800;
-    background: linear-gradient(135deg, #fff 0%, #f5f5dc 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    margin-bottom: 0.5rem;
-    text-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-}
-
-.subtitle {
-    font-size: 1.25rem;
-    color: #2c1810;
-    margin-bottom: 0.5rem;
-    font-weight: 500;
-}
-
-.tagline {
-    font-size: 0.95rem;
-    color: #3d2817;
-    font-style: italic;
-}
-
 .main-card {
     background: rgba(255, 255, 255, 0.95);
     backdrop-filter: blur(10px);
     border-radius: 24px;
     padding: 2.5rem;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
-    animation: fadeInUp 0.8s ease-out;
 }
 
 .upload-section {
@@ -446,28 +398,6 @@
     box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
-@@keyframes fadeInDown {
-    from {
-        opacity: 0;
-        transform: translateY(-20px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-@@keyframes fadeInUp {
-    from {
-        opacity: 0;
-        transform: translateY(20px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
 @@keyframes fadeIn {
     from { opacity: 0; }
     to { opacity: 1; }
@@ -492,18 +422,6 @@
 }
 
 @@media (max-width: 640px) {
-    .app-container {
-        padding: 1rem 0.75rem;
-    }
-
-    .title {
-        font-size: 2.5rem;
-    }
-
-    .subtitle {
-        font-size: 1rem;
-    }
-
     .main-card {
         padding: 1.5rem;
         border-radius: 16px;

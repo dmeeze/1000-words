@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace Llm64.Services;
+namespace Llm64.Wasm.Services;
 
 public class PngTextEmbedder
 {

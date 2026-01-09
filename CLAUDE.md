@@ -8,7 +8,7 @@ Application that embeds text into PNG files such that the text appears verbatim 
 
 ### Projects
 
-- **Llm64** - Blazor WebAssembly application with web UI
+- **Llm64.Wasm** - Blazor WebAssembly application with web UI (minimal Blazor, mostly static HTML)
 - **Llm64.Cli** - Command-line interface
 - **Llm64.Tests** - Unit tests
 
@@ -19,8 +19,8 @@ Application that embeds text into PNG files such that the text appears verbatim 
 dotnet build
 
 # Run Blazor WASM app
-dotnet run --project Llm64/Llm64.csproj
-dotnet watch --project Llm64/Llm64.csproj  # with hot reload
+dotnet run --project Llm64.Wasm/Llm64.Wasm.csproj
+dotnet watch --project Llm64.Wasm/Llm64.Wasm.csproj  # with hot reload
 
 # Run CLI
 dotnet run --project Llm64.Cli/Llm64.Cli.csproj -- -i input.png -o output.png -m "message"
@@ -37,7 +37,7 @@ dotnet test --logger "console;verbosity=detailed"
 
 ## Architecture
 
-### Core Logic: PngTextEmbedder Service (`/Llm64/Services/PngTextEmbedder.cs`)
+### Core Logic: PngTextEmbedder Service (`/Llm64.Wasm/Services/PngTextEmbedder.cs`)
 
 Static utility class that handles all PNG manipulation logic. Key methods:
 
@@ -103,14 +103,22 @@ Uses custom ancillary chunk type **"sLOP"** (lowercase 's' = ancillary, uppercas
 - `BuildChunk(string chunkType, byte[] data)`:
   - Creates PNG chunk with proper structure: length + type + data + CRC32
 
-### UI Layer (`/Llm64/Pages/Index.razor`)
+### UI Layer
 
-Simple Blazor component:
-- File upload via `InputFile` component
-- Text input via `textarea`
-- Calls `PngTextEmbedder` service methods
-- Displays modified image with download link
-- Shows base64 excerpt with embedded text highlighted
+**Static HTML Pages:**
+- `index.html`: Home page with navigation, hero section, and Blazor component container
+- `about.html`: Static about/documentation page (no Blazor)
+- `css/common.css`: Unified stylesheet (4.9 KB, 270 lines) containing all styles
+
+**Blazor Components (Minimal):**
+- `Pages/Index.razor`: Interactive main-card component rendered into `#app` div
+  - File upload via `InputFile` component
+  - Text input via `textarea`
+  - Calls `PngTextEmbedder` service methods
+  - Displays modified image with download link
+  - Shows base64 excerpt with embedded text highlighted
+- `_Imports.razor`: Minimal global using statements (only Forms and Web)
+- No routing, no layouts - direct component rendering via `Program.cs`
 
 ### CLI Application (`/Llm64.Cli/Program.cs`)
 

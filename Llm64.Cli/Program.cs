@@ -1,4 +1,4 @@
-using Llm64.Services;
+using Llm64.Wasm.Services;
 
 if (args.Length == 0)
 {

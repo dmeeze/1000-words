@@ -4,6 +4,80 @@ A web application that embeds text into PNG images at the base64 level, allowing
 
 ## Recent Updates
 
+### Architecture Restructure - Plain HTML Layout - Completed (2026-01-10)
+
+**Changes Implemented:**
+- Restructured application to use plain HTML for layout and navigation
+- Created two standalone HTML pages:
+  - `index.html`: Home page with hero section, navigation, and Blazor component container
+  - `about.html`: Static about page with full content (no Blazor needed)
+- Unified all CSS into `css/common.css` with reusable, semantic class names:
+  - Navigation: `.nav-bar`, `.nav-container`, `.nav-brand`, `.nav-links`, `.nav-link`
+  - Layout: `.app-container`, `.main-card`
+  - Hero sections: `.hero`, `.title`, `.subtitle`, `.tagline`
+  - Content blocks: `.content` (for text/blog/content pages with p, h2, ul, li, a styles)
+  - Animations: `fadeInDown`, `fadeInUp`
+  - Responsive breakpoints for all components
+- HTML files contain zero inline styles - all styling is externalized
+- Class names are generic and reusable for future pages
+- Simplified Blazor to only handle interactive functionality:
+  - `Pages/Index.razor`: Now contains only the main-card (file upload, text processing, results)
+  - `_Imports.razor`: Minimal global using statements (only Forms and Web)
+  - Removed routing and layout components from Blazor
+- Updated `Program.cs` to directly render Index component (no router)
+- Removed unused Blazor files:
+  - `About.razor` (replaced with static about.html)
+  - `App.razor` (routing no longer needed)
+  - `MainLayout.razor` (layout in HTML now)
+
+**CSS Architecture:**
+- `common.css`: Single unified stylesheet containing all styles (4.9 KB, 270 lines)
+  - Reset and base styles (*, body, h1)
+  - Blazor error UI
+  - Navigation components
+  - Layout (app-container, main-card)
+  - Hero sections (hero, title, subtitle, tagline)
+  - Content blocks (content with p, h2, ul, li, a)
+  - Animations (fadeInDown, fadeInUp)
+  - Responsive breakpoints
+- Zero inline styles in HTML files
+- Future content pages can use: `.hero` + `.title` + `.main-card` + `.content`
+
+**Benefits:**
+- Faster initial page load (less JavaScript for navigation/layout)
+- SEO-friendly static pages
+- Cleaner separation between static content and interactive functionality
+- About page is fully static HTML with no Blazor overhead
+- Minimal Blazor footprint (only 2 .razor files for interactive functionality)
+- Highly reusable CSS with semantic class names
+- Easy to add new content/blog pages using existing styles
+
+**Verification:**
+- Solution builds successfully with 0 warnings, 0 errors
+- All 37 unit tests pass
+- Release build verified
+- Published output includes only common.css (4.9 KB uncompressed, ~1.2 KB compressed)
+- Zero inline styles in HTML files confirmed
+- Minimal Blazor files: only Index.razor and _Imports.razor remain
+- Removed files: About.razor, App.razor, MainLayout.razor, app.css
+
+### Project Namespace Rename - Completed (2026-01-10)
+
+**Changes Implemented:**
+- Renamed project from `Llm64` to `Llm64.Wasm`
+- Updated `RootNamespace` in Llm64.Wasm.csproj from `Llm64` to `Llm64.Wasm`
+- Updated all namespace declarations:
+  - `Llm64.Services` → `Llm64.Wasm.Services` in PngTextEmbedder.cs
+  - Updated using statements in Program.cs, _Imports.razor, and Index.razor
+- Updated namespace references in dependent projects:
+  - Llm64.Tests/PngTextEmbedderTests.cs
+  - Llm64.Cli/Program.cs
+
+**Verification:**
+- Solution builds successfully with 0 warnings, 0 errors
+- All 37 unit tests pass
+- Release build verified
+
 ### Color Scheme and Navigation Update - Completed (2026-01-08)
 
 **Changes Implemented:**
