@@ -146,18 +146,56 @@ public class PngTool
         var chunkLength = (pngData[slopIndex] << 24) | (pngData[slopIndex + 1] << 16) |
                           (pngData[slopIndex + 2] << 8) | pngData[slopIndex + 3];
 
-        // Calculate alignment padding (same calculation as in InsertChunk)
         var bufferStartInPng = slopIndex + 8; // After length and type fields
-        var paddingToLineStart = (57 - (bufferStartInPng % 57)) % 57;
 
-        // Extract data portion, skipping alignment padding
-        var dataStart = slopIndex + 8 + paddingToLineStart;
-        var textBytesLength = chunkLength - paddingToLineStart;
+        // Try both Email and Compact styles to detect which was used
+        // We'll detect Email style by checking if there are multiple empty lines (padding lines)
 
-        if (textBytesLength <= 0) return null;
+        // First, try Email style with 57-byte boundary padding
+        var emailPaddingToLineStart = (57 - (bufferStartInPng % 57)) % 57;
+        var emailDataStart = bufferStartInPng + emailPaddingToLineStart;
+        var emailTextBytesLength = chunkLength - emailPaddingToLineStart;
 
-        var textBytes = new byte[textBytesLength];
-        Array.Copy(pngData, dataStart, textBytes, 0, textBytesLength);
+        // Then, try Compact style with 3-byte boundary padding
+        var compactPaddingToLineStart = (3 - (bufferStartInPng % 3)) % 3;
+        var compactDataStart = bufferStartInPng + compactPaddingToLineStart;
+        var compactTextBytesLength = chunkLength - compactPaddingToLineStart;
+
+        // Extract with Email style first
+        byte[] textBytes;
+
+        if (emailTextBytesLength > 0)
+        {
+            var emailTextBytes = new byte[emailTextBytesLength];
+            Array.Copy(pngData, emailDataStart, emailTextBytes, 0, emailTextBytesLength);
+            var emailBase64 = Convert.ToBase64String(emailTextBytes);
+            var emailLines = new List<string>();
+            for (var i = 0; i < emailBase64.Length; i += Base64DisplayLineWidth)
+            {
+                var length = Math.Min(Base64DisplayLineWidth, emailBase64.Length - i);
+                emailLines.Add(emailBase64.Substring(i, length));
+            }
+            var emailTrimmedLines = emailLines.Select(line => line.TrimEnd(_mode.WhitespaceChar)).ToList();
+
+            // Check if we have multiple empty lines at the start (Email style signature)
+            var emptyLineCount = emailTrimmedLines.TakeWhile(line => string.IsNullOrEmpty(line)).Count();
+            if (emptyLineCount >= 2)
+            {
+                textBytes = emailTextBytes;
+            }
+            else
+            {
+                // Use Compact style
+                textBytes = new byte[compactTextBytesLength];
+                Array.Copy(pngData, compactDataStart, textBytes, 0, compactTextBytesLength);
+            }
+        }
+        else
+        {
+            // Use Compact style
+            textBytes = new byte[compactTextBytesLength];
+            Array.Copy(pngData, compactDataStart, textBytes, 0, compactTextBytesLength);
+        }
 
         // Convert to base64 and format at 76 chars per line
         var base64 = Convert.ToBase64String(textBytes);
@@ -229,7 +267,7 @@ public class PngTool
             _ => throw new InvalidOperationException()
         };
         // Insert empty buffer, then overwrite with correct bytes
-        return InsertChunk(pngData, embeddedText, insertPosition);
+        return InsertChunk(pngData, embeddedText, insertPosition, style);
     }
 
     private static int FindChunk(byte[] data, string chunkType)
@@ -275,7 +313,7 @@ public class PngTool
         return result.ToArray();
     }
 
-    private byte[] InsertChunk(byte[] pngData, string text, int insertPosition)
+    private byte[] InsertChunk(byte[] pngData, string text, int insertPosition, EmbeddingStyle style)
     {
         // Ensure text length is a multiple of 4 for proper base64 encoding
         var mod = text.Length % 4;
@@ -291,11 +329,22 @@ public class PngTool
         // Chunk structure: length(4) + type(4) + data(N) + CRC(4)
         var bufferStartInPng = insertPosition + 8; // After length and type fields
 
-        // Calculate padding needed to align to 57-byte boundary
-        // Standard base64 wraps at 76 chars = 57 bytes
-        var currentPosition = bufferStartInPng;
-        var paddingToLineStart = (57 - (currentPosition % 57)) % 57;
-        
+        // Calculate padding needed based on style:
+        // - Email style: align to 57-byte boundary (76 base64 chars = 57 bytes)
+        //   This makes text start on a new line in email-style base64
+        // - Compact style: align to 3-byte boundary only
+        //   This makes text appear verbatim but not necessarily at line starts
+        var paddingToLineStart = 0;
+        if (style == EmbeddingStyle.Email)
+        {
+            paddingToLineStart = (57 - (bufferStartInPng % 57)) % 57;
+        }
+        else
+        {
+            // For Compact style, just align to 3-byte boundary
+            paddingToLineStart = (3 - (bufferStartInPng % 3)) % 3;
+        }
+
         // Calculate total buffer size
         var totalBufferSize = paddingToLineStart + rawBytes.Length;
 
@@ -314,10 +363,13 @@ public class PngTool
         // Now overwrite the buffer with actual content
         var writePosition = bufferStartInPng;
 
-        // Generate padding before text (alignment-aware for base64)
-        var paddingBeforeBytes = GeneratePadding(writePosition % 3, paddingToLineStart);
-        Array.Copy(paddingBeforeBytes, 0, tempPng, writePosition, paddingBeforeBytes.Length);
-        writePosition += paddingBeforeBytes.Length;
+        // Generate padding before text (alignment-aware for base64) - only for Email style
+        if (paddingToLineStart > 0)
+        {
+            var paddingBeforeBytes = GeneratePadding(writePosition % 3, paddingToLineStart);
+            Array.Copy(paddingBeforeBytes, 0, tempPng, writePosition, paddingBeforeBytes.Length);
+            writePosition += paddingBeforeBytes.Length;
+        }
 
         // Write the raw bytes
         Array.Copy(rawBytes, 0, tempPng, writePosition, rawBytes.Length);
