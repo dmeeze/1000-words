@@ -288,4 +288,98 @@ public class PngToolTests
         Assert.True(base64.Contains(text),
             $"Text '{text}' not found with {extraBytes} extra bytes (alignment offset {extraBytes % 3})");
     }
+
+    [Fact]
+    public void ExtractEmbeddedText_RoundTrip_SingleLine()
+    {
+        var inputText = "Hello World";
+        var modifiedPng = _standardPngTool.EmbedTextInPng(MinimalPng, inputText, EmbeddingStyle.Email);
+
+        var extractedText = _standardPngTool.ExtractEmbeddedText(modifiedPng);
+
+        Assert.NotNull(extractedText);
+        Assert.Equal(inputText, extractedText);
+    }
+
+    [Fact]
+    public void ExtractEmbeddedText_RoundTrip_MultiLine()
+    {
+        var inputText = "Line 1\nLine 2\nLine 3";
+        var modifiedPng = _standardPngTool.EmbedTextInPng(MinimalPng, inputText, EmbeddingStyle.Email);
+
+        var extractedText = _standardPngTool.ExtractEmbeddedText(modifiedPng);
+
+        Assert.NotNull(extractedText);
+        Assert.Equal(inputText, extractedText);
+    }
+
+    [Fact]
+    public void ExtractEmbeddedText_NoPngWithoutSlopChunk_ReturnsNull()
+    {
+        var extractedText = _standardPngTool.ExtractEmbeddedText(MinimalPng);
+        Assert.Null(extractedText);
+    }
+
+    [Fact]
+    public void ExtractEmbeddedText_InvalidPng_ReturnsNull()
+    {
+        var invalidData = new byte[] { 0x00, 0x01, 0x02, 0x03 };
+        var extractedText = _standardPngTool.ExtractEmbeddedText(invalidData);
+        Assert.Null(extractedText);
+    }
+
+    [Fact]
+    public void ExtractEmbeddedText_DecodesSpacesAndNewlines()
+    {
+        var inputText = "Hello World\nThis is a test\nWith multiple lines";
+        var modifiedPng = _standardPngTool.EmbedTextInPng(MinimalPng, inputText, EmbeddingStyle.Email);
+
+        var extractedText = _standardPngTool.ExtractEmbeddedText(modifiedPng);
+
+        Assert.NotNull(extractedText);
+        // Should decode '+' back to spaces
+        Assert.Contains("Hello World", extractedText);
+        Assert.Contains("This is a test", extractedText);
+        Assert.Contains("With multiple lines", extractedText);
+        // Should preserve newlines
+        Assert.Contains("\n", extractedText);
+        Assert.Equal(inputText, extractedText);
+    }
+
+    [Fact]
+    public void ExtractEmbeddedText_CompactStyle_RoundTrip()
+    {
+        var inputText = "Compact test";
+        var modifiedPng = _standardPngTool.EmbedTextInPng(MinimalPng, inputText, EmbeddingStyle.Compact);
+
+        var extractedText = _standardPngTool.ExtractEmbeddedText(modifiedPng);
+
+        Assert.NotNull(extractedText);
+        Assert.Equal(inputText, extractedText);
+    }
+
+    [Fact]
+    public void ExtractEmbeddedText_CompactStyle_MultiLine_RoundTrip()
+    {
+        var inputText = "Line 1\nLine 2\nLine 3";
+        var modifiedPng = _standardPngTool.EmbedTextInPng(MinimalPng, inputText, EmbeddingStyle.Compact);
+
+        var extractedText = _standardPngTool.ExtractEmbeddedText(modifiedPng);
+
+        Assert.NotNull(extractedText);
+        Assert.Equal(inputText, extractedText);
+    }
+
+    [Fact]
+    public void ExtractEmbeddedText_PreservesIntentionalTrailingNewline()
+    {
+        // User intentionally adds a trailing newline
+        var inputText = "Line 1\nLine 2\n";
+        var modifiedPng = _standardPngTool.EmbedTextInPng(MinimalPng, inputText, EmbeddingStyle.Compact);
+
+        var extractedText = _standardPngTool.ExtractEmbeddedText(modifiedPng);
+
+        Assert.NotNull(extractedText);
+        Assert.Equal(inputText, extractedText);
+    }
 }

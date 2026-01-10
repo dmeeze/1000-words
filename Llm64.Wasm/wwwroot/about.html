@@ -60,8 +60,10 @@
 iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACklEQVR4nGMAAQAABQABDQottAAA
 AABJRU5ErkJggg==
                 </pre>
+                
+                <p>&nbsp;</p>
 
-                <p>But this image is also a 1x1 pixel white square.</p>
+                <p>But this next image is also a 1x1 pixel white square.</p>
                 
                 <p>
                     <a href="img/1x1plus.png">
@@ -88,12 +90,39 @@ Joel+Spolsky+2002+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 IxEC/AAAAApJREFUeJxjAAEAAAUAAQ0KLbQAAAAASUVORK5CYII=
                 </pre>
+
+
+                <p>&nbsp;</p>
+
+                <p>Basically, if you attach one of these images to an email, and you view the original SMTP/MIME
+                    source of the email body, you'll see the base64 parts as above.  Similarly if you include the
+                    image in a webpage using an <a href="https://datatracker.ietf.org/doc/html/rfc2397">embedded 
+                    data base64 image</a>, then your encoded text is visible in the raw html, but doesn't appear
+                    in webpage search or when looking at the image itself.</p>
+
+                <h2>What are the implications?</h2>
+                <p>Nothing!  This was just for fun after a discussion with a colleague whether it might be even possible
+                    to make base64 blobs look readable. There's certainly no poorly coded systems out there which might be
+                    hooked up to read emails or webpages and interpret any text they see as information.</p>
+                <p>No siree I'm sure everyone is keeping the attachments and the content well and truly isolated
+                    from each other and this couldn't possibly do anything other than be a fun proof of concept and 
+                    excuse for me to play with wasm.</p>
+                
+                <p>Some fun images include:
+                </p>
+                
+                <ul>
+                    <li><a href="img/pixel.png">pixel.png</a> A 1x1 transparent pixel which displays the full text of the Universal Declaration of Human Rights</li>
+                    <li><a href="img/sonnets.png">sonnets.png</a> A picture of Shakespeare's Sonnets which displays full text of Shakespeare's Sonnets</li>
+                    <li><a href="img/Mona_Lisa_300x400.png">Mona_Lisa_300x400.png</a> The image of the Mona Lisa used on this site - which displays the CC-BY-SA 4.0 attribution for it's sourcing</li>
+                    <li><a href="img/environment.png">environment.png</a> An "please consider this environment" email footer which has an instruction that the email must be printed out and stored offsite</li>
+                </ul>
                 
                 <h2>Ok, how does it work?</h2>
                 <p>We take advantage of a few things.</p>
                 <ul>
                     <li>PNG files allow us to add our own blocks of data without affecting the image itself</li>
-                    <li>base64 encodes data by converting bytes to the ascii characters A..Z, a..z, 0..9 as well as + and /</li>
+                    <li>base64 encodes data by converting bytes to the ascii characters <code>A..Z</code>, <code>a..z</code>, <code>0..9</code> as well as <code>+</code> and <code>/</code></li>
                     <li>email programs and browsers put attachments in base64 blobs
                     <ul>
                         <li>email is a series of mime parts bodies (blocks of text separated by dividers)</li>
@@ -102,33 +131,30 @@ IxEC/AAAAApJREFUeJxjAAEAAAUAAQ0KLbQAAAAASUVORK5CYII=
                 </ul>
                 <p>So let's say we want to display the text "1000 words" when our image is encoded
                     in base64.  Our first problem is that base64 doesn't allow spaces, but maybe we're ok with
-                    "+1000+words+" (we like our message to be a multiple of four characters).</p>
+                    <code>+1000+words+</code> (we like our message to be a multiple of four characters).</p>
                 <p>We first need to work out what bytes encode to that base64 string.  That's easy enough, since 3 bytes
                     is encoded as 4 base64 characters.  (3 * 8 bits = 24 bits of data) Then each of the 64 valid base64 characters represents 6 bits of data (2 * 6 bits = 24 bits).  So 3 bytes in the input becomes 4
                     characters in the output.</p>
-                <p>Which means to show "+1000+words+" in the encoded data, we need the 3-byte sequences which create the 
+                <p>Which means to show <code>+1000+words+</code> in the encoded data, we need the 3-byte sequences which create the
                     4-char values we want.</p>
                 <ul>
-                    <li>fb5d34 becomes +100</li> 
-                    <li>d3ec28  becomes 0+wo</li>
-                    <li>addb3e  becomes rds+</li>
+                    <li><code>fb5d34</code> becomes <code>+100</code></li>
+                    <li><code>d3ec28</code> becomes <code>0+wo</code></li>
+                    <li><code>addb3e</code> becomes <code>rds+</code></li>
                 </ul>
                 <p>Of course, it's not quite that simple, and we need to make sure we start on a 3-byte offset so our
                     text always shows up, but that's just a little padding.  You can experiment yourself with this in 
                     GCHQ's <a href="https://gchq.github.io/CyberChef/#recipe=From_Hex('None')To_Base64('A-Za-z0-9%2B/%3D')&input=ZmI1ZDM0ZDNlYzI4YWRkYjNl">cyberchef</a>
                     if you'd like to explore what any of that means</p>
+
+                <h2>Can I see the code?</h2>
+                <p>Yep, it's <a href="https://github.com/dmeeze/1000-words">on github and is MIT licensed</a>.  Yes, it was AI assisted, but not vibe coded.</p>
                 
                 <h2>Are you stealing my pictures?</h2>
                 <p>No, i don't want your pictures and in fact I never see them.  This webapp is a blazor WASM application,
                     originally written in dotnet and built to run in your browser.  Nothing here ever leaves your browser.
                     I don't even run analytics on this site.</p>
 
-                <h2>What are the implications?</h2>
-                <p>Nothing!  This was just for fun after a discussion with a colleague whether it might be even possible
-                    to make base64 blobs look readable. There's certainly no poorly coded systems out there which might be
-                    hooked up to read emails or webpages and interpret any text they see as information.</p>
-                <p>No siree I'm sure they're all keeping the attachments and the content well and truly isolated 
-                    from each other and this couldn't possibly do anything other than be a fun tech demo.</p>
             </div>
         </div>
     </div>

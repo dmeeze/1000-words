@@ -7,7 +7,7 @@ public record Base64Mode(string Chars, char? PaddingChar, char WhitespaceChar, c
     // RFC4648
     public static readonly Base64Mode Standard =
         new Base64Mode("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/", '=', '+', '/');
-    // RFC4648 Section 5
+    // RFC4648 Section 5 - TODO
     public static readonly Base64Mode UrlSafe =
         new Base64Mode("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_", null, '_', '-');
 };
@@ -56,7 +56,7 @@ public class PngTool
         {
             // Normalize each line: keep only valid base64 characters
             var chars = new List<char>();
-            foreach (char c in line)
+            foreach (var c in line)
             {
                 char? appendChar = c switch
                 {
@@ -97,10 +97,10 @@ public class PngTool
             else
             {
                 // poor-man's wrap (maybe we do word breaks one day)
-                for (int i = 0; i < line.Length; i += Base64DisplayLineWidth)
+                for (var i = 0; i < line.Length; i += Base64DisplayLineWidth)
                 {
-                    int length = Math.Min(Base64DisplayLineWidth, line.Length - i);
-                    string segment = line.Substring(i, length);
+                    var length = Math.Min(Base64DisplayLineWidth, line.Length - i);
+                    var segment = line.Substring(i, length);
                     sb.Append(segment.PadRight(Base64DisplayLineWidth, _mode.WhitespaceChar));
                 }
             }
@@ -134,16 +134,91 @@ public class PngTool
         return sb.ToString();
     }
 
+    public string? ExtractEmbeddedText(byte[] pngData)
+    {
+        if (!IsPng(pngData)) return null;
+
+        // Find sLOP chunk
+        var slopIndex = FindChunk(pngData, "sLOP");
+        if (slopIndex == -1) return null; // No embedded text found
+
+        // Read chunk length (4 bytes, big-endian)
+        var chunkLength = (pngData[slopIndex] << 24) | (pngData[slopIndex + 1] << 16) |
+                          (pngData[slopIndex + 2] << 8) | pngData[slopIndex + 3];
+
+        // Calculate alignment padding (same calculation as in InsertChunk)
+        var bufferStartInPng = slopIndex + 8; // After length and type fields
+        var paddingToLineStart = (57 - (bufferStartInPng % 57)) % 57;
+
+        // Extract data portion, skipping alignment padding
+        var dataStart = slopIndex + 8 + paddingToLineStart;
+        var textBytesLength = chunkLength - paddingToLineStart;
+
+        if (textBytesLength <= 0) return null;
+
+        var textBytes = new byte[textBytesLength];
+        Array.Copy(pngData, dataStart, textBytes, 0, textBytesLength);
+
+        // Convert to base64 and format at 76 chars per line
+        var base64 = Convert.ToBase64String(textBytes);
+        var lines = new List<string>();
+
+        for (var i = 0; i < base64.Length; i += Base64DisplayLineWidth)
+        {
+            var length = Math.Min(Base64DisplayLineWidth, base64.Length - i);
+            lines.Add(base64.Substring(i, length));
+        }
+
+        // Trim padding characters from the right of each line
+        var trimmedLines = lines.Select(line => line.TrimEnd(_mode.WhitespaceChar)).ToList();
+
+        // Skip leading empty lines (padding header)
+        while (trimmedLines.Count > 0 && string.IsNullOrEmpty(trimmedLines[0]))
+        {
+            trimmedLines.RemoveAt(0);
+        }
+
+        // Skip trailing empty lines (padding footer)
+        while (trimmedLines.Count > 0 && string.IsNullOrEmpty(trimmedLines[^1]))
+        {
+            trimmedLines.RemoveAt(trimmedLines.Count - 1);
+        }
+
+        if (trimmedLines.Count == 0) return null; // No content found
+
+        // Decode the encoded characters back to original:
+        // - WhitespaceChar (+) → space
+        // - LinebreakChar (/) → newline
+        var decodedLines = trimmedLines.Select(line =>
+        {
+            var decoded = line.Replace(_mode.WhitespaceChar, ' ');
+            decoded = decoded.Replace(_mode.LinebreakChar, '\n');
+            return decoded;
+        }).ToList();
+
+        // Join lines with newlines
+        var result = string.Join("\n", decodedLines);
+
+        // Remove exactly one trailing newline (Compact style adds a trailing LinebreakChar)
+        // Don't use TrimEnd as that removes ALL trailing newlines
+        if (result.EndsWith('\n'))
+        {
+            result = result.Substring(0, result.Length - 1);
+        }
+
+        return result;
+    }
+
     public byte[] EmbedTextInPng(byte[] pngData, string text, EmbeddingStyle style)
     {
         if (!IsPng(pngData)) throw new ArgumentException("Invalid PNG file", nameof(pngData));
 
         // Find IHDR chunk
-        int ihdrIndex = FindChunk(pngData, PngHeaderChunkType);
+        var ihdrIndex = FindChunk(pngData, PngHeaderChunkType);
         if (ihdrIndex == -1) throw new Exception("Invalid PNG: Header chunk not found");
 
         // IHDR chunk structure: length(4) + type(4) + data(13) + CRC(4) = 25 bytes
-        int insertPosition = ihdrIndex + 25;
+        var insertPosition = ihdrIndex + 25;
 
         // Normalize and process lines for proper base64 layout
         var normalizedLines = NormalizePrompt(text);
@@ -159,8 +234,8 @@ public class PngTool
 
     private static int FindChunk(byte[] data, string chunkType)
     {
-        byte[] typeBytes = Encoding.ASCII.GetBytes(chunkType);
-        for (int i = 8; i < data.Length - 4; i++)
+        var typeBytes = Encoding.ASCII.GetBytes(chunkType);
+        for (var i = 8; i < data.Length - 4; i++)
         {
             if (data[i] == typeBytes[0] && data[i + 1] == typeBytes[1] &&
                 data[i + 2] == typeBytes[2] && data[i + 3] == typeBytes[3])
@@ -186,12 +261,12 @@ public class PngTool
         };
 
         // Now add the repeating pattern
-        int remainingBytes = finalByteSize - result.Count;
+        var remainingBytes = finalByteSize - result.Count;
         
-        for (int i = 0; i < remainingBytes; i += 3)
+        for (var i = 0; i < remainingBytes; i += 3)
         {
-            int copyLen = Math.Min(3, remainingBytes - i);
-            for (int j = 0; j < copyLen; j++)
+            var copyLen = Math.Min(3, remainingBytes - i);
+            for (var j = 0; j < copyLen; j++)
             {
                 result.Add(pattern[j]);
             }
@@ -203,44 +278,44 @@ public class PngTool
     private byte[] InsertChunk(byte[] pngData, string text, int insertPosition)
     {
         // Ensure text length is a multiple of 4 for proper base64 encoding
-        int mod = text.Length % 4;
+        var mod = text.Length % 4;
         if (mod != 0)
         {
             text += new string(_mode.WhitespaceChar, 4 - mod);
         }
 
         // Decode text to raw bytes
-        byte[] rawBytes = ManuallyDecodeBase64(text);
+        var rawBytes = ManuallyDecodeBase64(text);
 
         // Calculate where the buffer will start in the PNG
         // Chunk structure: length(4) + type(4) + data(N) + CRC(4)
-        int bufferStartInPng = insertPosition + 8; // After length and type fields
+        var bufferStartInPng = insertPosition + 8; // After length and type fields
 
         // Calculate padding needed to align to 57-byte boundary
         // Standard base64 wraps at 76 chars = 57 bytes
-        int currentPosition = bufferStartInPng;
-        int paddingToLineStart = (57 - (currentPosition % 57)) % 57;
+        var currentPosition = bufferStartInPng;
+        var paddingToLineStart = (57 - (currentPosition % 57)) % 57;
         
         // Calculate total buffer size
-        int totalBufferSize = paddingToLineStart + rawBytes.Length;
+        var totalBufferSize = paddingToLineStart + rawBytes.Length;
 
         // Create empty buffer (all zeros)
-        byte[] emptyBuffer = new byte[totalBufferSize];
+        var emptyBuffer = new byte[totalBufferSize];
 
         // Build the chunk with empty buffer
-        byte[] chunk = BuildChunk("sLOP", emptyBuffer);
+        var chunk = BuildChunk("sLOP", emptyBuffer);
 
         // Insert the chunk into the PNG
-        byte[] tempPng = new byte[pngData.Length + chunk.Length];
+        var tempPng = new byte[pngData.Length + chunk.Length];
         Array.Copy(pngData, 0, tempPng, 0, insertPosition);
         Array.Copy(chunk, 0, tempPng, insertPosition, chunk.Length);
         Array.Copy(pngData, insertPosition, tempPng, insertPosition + chunk.Length, pngData.Length - insertPosition);
 
         // Now overwrite the buffer with actual content
-        int writePosition = bufferStartInPng;
+        var writePosition = bufferStartInPng;
 
         // Generate padding before text (alignment-aware for base64)
-        byte[] paddingBeforeBytes = GeneratePadding(writePosition % 3, paddingToLineStart);
+        var paddingBeforeBytes = GeneratePadding(writePosition % 3, paddingToLineStart);
         Array.Copy(paddingBeforeBytes, 0, tempPng, writePosition, paddingBeforeBytes.Length);
         writePosition += paddingBeforeBytes.Length;
 
@@ -248,12 +323,12 @@ public class PngTool
         Array.Copy(rawBytes, 0, tempPng, writePosition, rawBytes.Length);
         
         // Recalculate CRC for the modified chunk
-        int crcPosition = insertPosition + 8 + totalBufferSize; // After length, type, and data
-        byte[] typeAndData = new byte[4 + totalBufferSize];
+        var crcPosition = insertPosition + 8 + totalBufferSize; // After length, type, and data
+        var typeAndData = new byte[4 + totalBufferSize];
         Array.Copy(Encoding.ASCII.GetBytes("sLOP"), 0, typeAndData, 0, 4);
         Array.Copy(tempPng, bufferStartInPng, typeAndData, 4, totalBufferSize);
-        uint crc = CalculateCrc32(typeAndData);
-        byte[] crcBytes = BitConverter.GetBytes(crc).Reverse().ToArray();
+        var crc = CalculateCrc32(typeAndData);
+        var crcBytes = BitConverter.GetBytes(crc).Reverse().ToArray();
         Array.Copy(crcBytes, 0, tempPng, crcPosition, 4);
 
         return tempPng;
@@ -274,10 +349,10 @@ public class PngTool
         writer.Write(data);
 
         // CRC32 (calculated over type + data)
-        byte[] typeAndData = new byte[4 + data.Length];
+        var typeAndData = new byte[4 + data.Length];
         Array.Copy(Encoding.ASCII.GetBytes(chunkType), 0, typeAndData, 0, 4);
         Array.Copy(data, 0, typeAndData, 4, data.Length);
-        uint crc = CalculateCrc32(typeAndData);
+        var crc = CalculateCrc32(typeAndData);
         writer.Write(BitConverter.GetBytes(crc).Reverse().ToArray());
 
         return ms.ToArray();
@@ -287,11 +362,11 @@ public class PngTool
     {
         // Convert each character to its 6-bit value
         var bits = new List<bool>();
-        foreach (char c in text)
+        foreach (var c in text)
         {
             if (c == _mode.PaddingChar || char.IsWhiteSpace(c)) continue; // Skip padding and spaces
 
-            int value = _mode.Chars.IndexOf(c);
+            var value = _mode.Chars.IndexOf(c);
             if (value == -1)
             {
                 // Invalid base64 character, skip or use 0
@@ -299,7 +374,7 @@ public class PngTool
             }
 
             // Add 6 bits
-            for (int i = 5; i >= 0; i--)
+            for (var i = 5; i >= 0; i--)
             {
                 bits.Add((value & (1 << i)) != 0);
             }
@@ -307,10 +382,10 @@ public class PngTool
 
         // Convert bits to bytes (8 bits per byte)
         var bytes = new List<byte>();
-        for (int i = 0; i + 7 < bits.Count; i += 8)
+        for (var i = 0; i + 7 < bits.Count; i += 8)
         {
             byte b = 0;
-            for (int j = 0; j < 8; j++)
+            for (var j = 0; j < 8; j++)
             {
                 if (bits[i + j])
                 {
@@ -325,11 +400,11 @@ public class PngTool
 
     private static uint CalculateCrc32(byte[] data)
     {
-        uint crc = 0xFFFFFFFF;
-        foreach (byte b in data)
+        var crc = 0xFFFFFFFF;
+        foreach (var b in data)
         {
             crc ^= b;
-            for (int i = 0; i < 8; i++)
+            for (var i = 0; i < 8; i++)
             {
                 if ((crc & 1) != 0)
                     crc = (crc >> 1) ^ 0xEDB88320;
