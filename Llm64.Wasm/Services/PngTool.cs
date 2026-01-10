@@ -251,6 +251,9 @@ public class PngTool
     {
         if (!IsPng(pngData)) throw new ArgumentException("Invalid PNG file", nameof(pngData));
 
+        // Remove all existing sLOP chunks before adding new one
+        pngData = RemoveAllChunks(pngData, "sLOP");
+
         // Find IHDR chunk
         var ihdrIndex = FindChunk(pngData, PngHeaderChunkType);
         if (ihdrIndex == -1) throw new Exception("Invalid PNG: Header chunk not found");
@@ -282,6 +285,33 @@ public class PngTool
             }
         }
         return -1;
+    }
+
+    private static byte[] RemoveAllChunks(byte[] data, string chunkType)
+    {
+        var result = data;
+
+        // Keep removing chunks until none are found
+        while (true)
+        {
+            var chunkIndex = FindChunk(result, chunkType);
+            if (chunkIndex == -1) break; // No more chunks of this type
+
+            // Read chunk length (4 bytes, big-endian)
+            var chunkLength = (result[chunkIndex] << 24) | (result[chunkIndex + 1] << 16) |
+                              (result[chunkIndex + 2] << 8) | result[chunkIndex + 3];
+
+            // Chunk structure: length(4) + type(4) + data(chunkLength) + CRC(4)
+            var totalChunkSize = 4 + 4 + chunkLength + 4;
+
+            // Remove this chunk
+            var newData = new byte[result.Length - totalChunkSize];
+            Array.Copy(result, 0, newData, 0, chunkIndex);
+            Array.Copy(result, chunkIndex + totalChunkSize, newData, chunkIndex, result.Length - (chunkIndex + totalChunkSize));
+            result = newData;
+        }
+
+        return result;
     }
 
     private static byte[] GeneratePadding(int alignment, int finalByteSize)
