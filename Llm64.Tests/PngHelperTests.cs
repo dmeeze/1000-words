@@ -2,7 +2,7 @@ using Llm64.Wasm.Services;
 
 namespace Llm64.Tests;
 
-public class PngToolTests
+public class PngHelperTests
 {
     // Minimal valid PNG (1x1 white pixel)
     private static readonly byte[] MinimalPng = new byte[]
@@ -27,43 +27,26 @@ public class PngToolTests
         0xAE, 0x42, 0x60, 0x82  // CRC
     };
 
-    private PngTool _standardPngTool = new PngTool(Base64Mode.Standard); 
-    private PngTool _urlSafePngTool = new PngTool(Base64Mode.UrlSafe); 
+    private PngHelper _standardPngHelper = new PngHelper(Base64Mode.Standard); 
+    private PngHelper _urlSafePngHelper = new PngHelper(Base64Mode.UrlSafe); 
 
     [Fact]
     public void IsPng_ValidPng_ReturnsTrue()
     {
-        Assert.True(_standardPngTool.IsPng(MinimalPng));
+        Assert.True(_standardPngHelper.IsPng(MinimalPng));
     }
 
     [Fact]
     public void IsPng_InvalidData_ReturnsFalse()
     {
         var invalidData = new byte[] { 0x00, 0x01, 0x02, 0x03 };
-        Assert.False(_standardPngTool.IsPng(invalidData));
+        Assert.False(_standardPngHelper.IsPng(invalidData));
     }
 
     [Fact]
     public void IsPng_EmptyArray_ReturnsFalse()
     {
-        Assert.False(_standardPngTool.IsPng(Array.Empty<byte>()));
-    }
-
-    [Theory]
-    [InlineData("Hello World", new[] { "Hello+World" })]
-    [InlineData("Hello\nWorld", new[] { "Hello", "World" })]
-    [InlineData("Hello\r\nWorld", new[] { "Hello", "World" })]
-    [InlineData("Test 123", new[] { "Test+123" })]
-    [InlineData("ABC!@#DEF", new[] { "ABCDEF" })]
-    [InlineData("a+b/c=", new[] { "a+b/c" })]
-    [InlineData("ABCDE", new[] { "ABCDE" })]
-    [InlineData("A", new[] { "A" })]
-    [InlineData("AB", new[] { "AB" })]
-    [InlineData("ABC", new[] { "ABC" })]
-    public void NormalizePrompt_VariousInputs_ReturnsExpectedOutput(string input, string[] expected)
-    {
-        var result = _standardPngTool.NormalizePrompt(input);
-        Assert.Equal(expected, result);
+        Assert.False(_standardPngHelper.IsPng(Array.Empty<byte>()));
     }
 
     [Theory]
@@ -72,17 +55,17 @@ public class PngToolTests
     public void EmbedTextInPng_ValidPng_ReturnsLargerPng(EmbeddingStyle style)
     {
         var text = "Hello+World";
-        var result = _standardPngTool.EmbedTextInPng(MinimalPng, text, style);
+        var result = _standardPngHelper.EmbedTextInPng(MinimalPng, text, style);
 
         Assert.True(result.Length > MinimalPng.Length);
-        Assert.True(_standardPngTool.IsPng(result));
+        Assert.True(_standardPngHelper.IsPng(result));
     }
 
     [Fact]
     public void EmbedTextInPng_InvalidPng_ThrowsException()
     {
         var invalidData = new byte[] { 0x00, 0x01, 0x02, 0x03 };
-        Assert.Throws<ArgumentException>(() => _standardPngTool.EmbedTextInPng(invalidData, "test", EmbeddingStyle.Email));
+        Assert.Throws<ArgumentException>(() => _standardPngHelper.EmbedTextInPng(invalidData, "test", EmbeddingStyle.Email));
     }
 
     [Theory]
@@ -104,7 +87,7 @@ public class PngToolTests
         // Texts where original length % 4 == 1 are padded with '+++'
 
         // Embed the text
-        var modifiedPng = _standardPngTool.EmbedTextInPng(MinimalPng, text, style);
+        var modifiedPng = _standardPngHelper.EmbedTextInPng(MinimalPng, text, style);
 
         // Convert to base64
         var base64 = Convert.ToBase64String(modifiedPng);
@@ -116,39 +99,18 @@ public class PngToolTests
     }
 
     [Fact]
-    public void NormalizePrompt_PreservesLinesAndNormalizesChars()
-    {
-        // Test that normalization preserves lines and normalizes characters
-
-        // Single line
-        var result1 = _standardPngTool.NormalizePrompt("ABCDE");
-        Assert.Equal(new[] { "ABCDE" }, result1);
-
-        // Multiple lines
-        var result2 = _standardPngTool.NormalizePrompt("Line1\nLine2\nLine3");
-        Assert.Equal(new[] { "Line1", "Line2", "Line3" }, result2);
-
-        // Spaces become +
-        var result3 = _standardPngTool.NormalizePrompt("Hello World");
-        Assert.Equal(new[] { "Hello+World" }, result3);
-
-        // Empty lines preserved
-        var result4 = _standardPngTool.NormalizePrompt("A\n\nB");
-        Assert.Equal(new[] { "A", "", "B" }, result4);
-    }
-
-    [Fact]
     public void EmbedTextInPng_WithMultiLineText_WorksCorrectly_ForEmailStyle()
     {
         // Test that multi-line text is embedded correctly
         var input = "CLI Test\nMessage";
 
         // Embed directly (EmbedTextInPng handles normalization)
-        var modifiedPng = _standardPngTool.EmbedTextInPng(MinimalPng, input, EmbeddingStyle.Email);
+        var modifiedPng = _standardPngHelper.EmbedTextInPng(MinimalPng, input, EmbeddingStyle.Email);
         var base64 = Convert.ToBase64String(modifiedPng);
 
         // Verify that normalized lines appear in base64
-        var normalizedLines = _standardPngTool.NormalizePrompt(input);
+        var base64Helper = new Base64Helper(Base64Mode.Standard);
+        var normalizedLines = base64Helper.NormalizeText(input);
         Assert.Equal(2, normalizedLines.Count);
         Assert.Equal("CLI+Test", normalizedLines[0]);
         Assert.Equal("Message", normalizedLines[1]);
@@ -165,7 +127,7 @@ public class PngToolTests
         var input = "CLI Test\nMessage";
 
         // Embed directly (EmbedTextInPng handles normalization)
-        var modifiedPng = _standardPngTool.EmbedTextInPng(MinimalPng, input, EmbeddingStyle.Compact);
+        var modifiedPng = _standardPngHelper.EmbedTextInPng(MinimalPng, input, EmbeddingStyle.Compact);
         var base64 = Convert.ToBase64String(modifiedPng);
         
         // Both lines should appear in the base64 output
@@ -178,7 +140,7 @@ public class PngToolTests
         // Test that each line appears at the start of a 76-char base64 line
         var input = "CLI Test\nMessage";
 
-        var modifiedPng = _standardPngTool.EmbedTextInPng(MinimalPng, input, EmbeddingStyle.Email);
+        var modifiedPng = _standardPngHelper.EmbedTextInPng(MinimalPng, input, EmbeddingStyle.Email);
         var base64 = Convert.ToBase64String(modifiedPng);
 
         // Split base64 into 76-char lines (standard base64 line width)
@@ -204,7 +166,7 @@ public class PngToolTests
     public void EmbedTextInPng_PreservesOriginalImageData(EmbeddingStyle style)
     {
         var text = "Test";
-        var modifiedPng = _standardPngTool.EmbedTextInPng(MinimalPng, text, style);
+        var modifiedPng = _standardPngHelper.EmbedTextInPng(MinimalPng, text, style);
 
         // Check that PNG signature is preserved
         Assert.Equal(MinimalPng[0], modifiedPng[0]);
@@ -226,7 +188,7 @@ public class PngToolTests
     public void EmbedTextInPng_DataChunkHasCorrectStructure(EmbeddingStyle style)
     {
         var text = "ABC";
-        var modifiedPng = _standardPngTool.EmbedTextInPng(MinimalPng, text, style);
+        var modifiedPng = _standardPngHelper.EmbedTextInPng(MinimalPng, text, style);
 
         // Find "sLOP" chunk type in the modified PNG
         bool foundDataChunk = false;
@@ -282,7 +244,7 @@ public class PngToolTests
         testPng.InsertRange(iendPos, dummyChunk);
 
         var text = "Test+123";
-        var modifiedPng = _standardPngTool.EmbedTextInPng(testPng.ToArray(), text, EmbeddingStyle.Email);
+        var modifiedPng = _standardPngHelper.EmbedTextInPng(testPng.ToArray(), text, EmbeddingStyle.Email);
         var base64 = Convert.ToBase64String(modifiedPng);
 
         Assert.True(base64.Contains(text),
@@ -293,9 +255,9 @@ public class PngToolTests
     public void ExtractEmbeddedText_RoundTrip_SingleLine()
     {
         var inputText = "Hello World";
-        var modifiedPng = _standardPngTool.EmbedTextInPng(MinimalPng, inputText, EmbeddingStyle.Email);
+        var modifiedPng = _standardPngHelper.EmbedTextInPng(MinimalPng, inputText, EmbeddingStyle.Email);
 
-        var extractedText = _standardPngTool.ExtractEmbeddedText(modifiedPng);
+        var extractedText = _standardPngHelper.ExtractEmbeddedText(modifiedPng);
 
         Assert.NotNull(extractedText);
         Assert.Equal(inputText, extractedText);
@@ -305,9 +267,9 @@ public class PngToolTests
     public void ExtractEmbeddedText_RoundTrip_MultiLine()
     {
         var inputText = "Line 1\nLine 2\nLine 3";
-        var modifiedPng = _standardPngTool.EmbedTextInPng(MinimalPng, inputText, EmbeddingStyle.Email);
+        var modifiedPng = _standardPngHelper.EmbedTextInPng(MinimalPng, inputText, EmbeddingStyle.Email);
 
-        var extractedText = _standardPngTool.ExtractEmbeddedText(modifiedPng);
+        var extractedText = _standardPngHelper.ExtractEmbeddedText(modifiedPng);
 
         Assert.NotNull(extractedText);
         Assert.Equal(inputText, extractedText);
@@ -316,7 +278,7 @@ public class PngToolTests
     [Fact]
     public void ExtractEmbeddedText_NoPngWithoutSlopChunk_ReturnsNull()
     {
-        var extractedText = _standardPngTool.ExtractEmbeddedText(MinimalPng);
+        var extractedText = _standardPngHelper.ExtractEmbeddedText(MinimalPng);
         Assert.Null(extractedText);
     }
 
@@ -324,7 +286,7 @@ public class PngToolTests
     public void ExtractEmbeddedText_InvalidPng_ReturnsNull()
     {
         var invalidData = new byte[] { 0x00, 0x01, 0x02, 0x03 };
-        var extractedText = _standardPngTool.ExtractEmbeddedText(invalidData);
+        var extractedText = _standardPngHelper.ExtractEmbeddedText(invalidData);
         Assert.Null(extractedText);
     }
 
@@ -332,9 +294,9 @@ public class PngToolTests
     public void ExtractEmbeddedText_DecodesSpacesAndNewlines()
     {
         var inputText = "Hello World\nThis is a test\nWith multiple lines";
-        var modifiedPng = _standardPngTool.EmbedTextInPng(MinimalPng, inputText, EmbeddingStyle.Email);
+        var modifiedPng = _standardPngHelper.EmbedTextInPng(MinimalPng, inputText, EmbeddingStyle.Email);
 
-        var extractedText = _standardPngTool.ExtractEmbeddedText(modifiedPng);
+        var extractedText = _standardPngHelper.ExtractEmbeddedText(modifiedPng);
 
         Assert.NotNull(extractedText);
         // Should decode '+' back to spaces
@@ -350,9 +312,9 @@ public class PngToolTests
     public void ExtractEmbeddedText_CompactStyle_RoundTrip()
     {
         var inputText = "Compact test";
-        var modifiedPng = _standardPngTool.EmbedTextInPng(MinimalPng, inputText, EmbeddingStyle.Compact);
+        var modifiedPng = _standardPngHelper.EmbedTextInPng(MinimalPng, inputText, EmbeddingStyle.Compact);
 
-        var extractedText = _standardPngTool.ExtractEmbeddedText(modifiedPng);
+        var extractedText = _standardPngHelper.ExtractEmbeddedText(modifiedPng);
 
         Assert.NotNull(extractedText);
         Assert.Equal(inputText, extractedText);
@@ -362,9 +324,9 @@ public class PngToolTests
     public void ExtractEmbeddedText_CompactStyle_MultiLine_RoundTrip()
     {
         var inputText = "Line 1\nLine 2\nLine 3";
-        var modifiedPng = _standardPngTool.EmbedTextInPng(MinimalPng, inputText, EmbeddingStyle.Compact);
+        var modifiedPng = _standardPngHelper.EmbedTextInPng(MinimalPng, inputText, EmbeddingStyle.Compact);
 
-        var extractedText = _standardPngTool.ExtractEmbeddedText(modifiedPng);
+        var extractedText = _standardPngHelper.ExtractEmbeddedText(modifiedPng);
 
         Assert.NotNull(extractedText);
         Assert.Equal(inputText, extractedText);
@@ -375,9 +337,9 @@ public class PngToolTests
     {
         // User intentionally adds a trailing newline
         var inputText = "Line 1\nLine 2\n";
-        var modifiedPng = _standardPngTool.EmbedTextInPng(MinimalPng, inputText, EmbeddingStyle.Compact);
+        var modifiedPng = _standardPngHelper.EmbedTextInPng(MinimalPng, inputText, EmbeddingStyle.Compact);
 
-        var extractedText = _standardPngTool.ExtractEmbeddedText(modifiedPng);
+        var extractedText = _standardPngHelper.ExtractEmbeddedText(modifiedPng);
 
         Assert.NotNull(extractedText);
         Assert.Equal(inputText, extractedText);
@@ -390,18 +352,18 @@ public class PngToolTests
     {
         // Embed first text
         var firstText = "First embedded text";
-        var pngWithFirstText = _standardPngTool.EmbedTextInPng(MinimalPng, firstText, style);
+        var pngWithFirstText = _standardPngHelper.EmbedTextInPng(MinimalPng, firstText, style);
 
         // Verify first text is embedded
-        var extractedFirst = _standardPngTool.ExtractEmbeddedText(pngWithFirstText);
+        var extractedFirst = _standardPngHelper.ExtractEmbeddedText(pngWithFirstText);
         Assert.Equal(firstText, extractedFirst);
 
         // Embed second text (should remove first sLOP chunk)
         var secondText = "Second embedded text";
-        var pngWithSecondText = _standardPngTool.EmbedTextInPng(pngWithFirstText, secondText, style);
+        var pngWithSecondText = _standardPngHelper.EmbedTextInPng(pngWithFirstText, secondText, style);
 
         // Verify only second text is present
-        var extractedSecond = _standardPngTool.ExtractEmbeddedText(pngWithSecondText);
+        var extractedSecond = _standardPngHelper.ExtractEmbeddedText(pngWithSecondText);
         Assert.Equal(secondText, extractedSecond);
 
         // Verify there's only one sLOP chunk by counting occurrences
@@ -431,17 +393,17 @@ public class PngToolTests
         var text2 = "Text 2";
         var text3 = "Text 3";
 
-        var png1 = _standardPngTool.EmbedTextInPng(MinimalPng, text1, style);
+        var png1 = _standardPngHelper.EmbedTextInPng(MinimalPng, text1, style);
 
         // Force add another chunk without removing (simulate old behavior)
         // We'll do this by creating a fresh PNG with text2 and manually combining chunks
-        var png2 = _standardPngTool.EmbedTextInPng(MinimalPng, text2, style);
+        var png2 = _standardPngHelper.EmbedTextInPng(MinimalPng, text2, style);
 
         // Now embed text3 - should remove all previous sLOP chunks
-        var finalPng = _standardPngTool.EmbedTextInPng(png1, text3, style);
+        var finalPng = _standardPngHelper.EmbedTextInPng(png1, text3, style);
 
         // Verify only text3 is present
-        var extracted = _standardPngTool.ExtractEmbeddedText(finalPng);
+        var extracted = _standardPngHelper.ExtractEmbeddedText(finalPng);
         Assert.Equal(text3, extracted);
 
         // Count sLOP chunks
