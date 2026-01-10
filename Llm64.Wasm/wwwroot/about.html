@@ -11,13 +11,17 @@
 
 <body>
     <!-- Navigation -->
-    <nav class="nav-bar">
-        <div class="nav-container">
-            <a href="index.html" class="nav-brand">1000 Words</a>
-            <div class="nav-links">
-                <a href="index.html" class="nav-link">Home</a>
-                <a href="about.html" class="nav-link">What is this?</a>
-            </div>
+    <input type="checkbox" id="hamburger-toggle" class="hamburger-toggle">
+    <label for="hamburger-toggle" class="hamburger-menu">
+        <span class="hamburger-line"></span>
+        <span class="hamburger-line"></span>
+        <span class="hamburger-line"></span>
+    </label>
+    <nav class="nav-overlay">
+        <a href="index.html" class="nav-brand">1000 Words</a>
+        <div class="nav-links">
+            <a href="index.html" class="nav-link">Home</a>
+            <a href="about.html" class="nav-link">What is this?</a>
         </div>
     </nav>
 
@@ -25,7 +29,10 @@
     <div class="app-container">
         <!-- Hero Section -->
         <div class="hero">
-            <h1 class="title">What is this?</h1>
+            <img src="img/Mona_Lisa_300x400.png" alt="Mona Lisa" class="hero-image">
+            <div class="hero-content">
+                <h1 class="title">What is this?</h1>
+            </div>
         </div>
 
         <!-- About Content -->
@@ -95,10 +102,9 @@ IxEC/AAAAApJREFUeJxjAAEAAAUAAQ0KLbQAAAAASUVORK5CYII=
                 </ul>
                 <p>So let's say we want to display the text "1000 words" when our image is encoded
                     in base64.  Our first problem is that base64 doesn't allow spaces, but maybe we're ok with
-                    "1000+words".</p>
+                    "+1000+words+" (we like our message to be a multiple of four characters).</p>
                 <p>We first need to work out what bytes encode to that base64 string.  That's easy enough, since 3 bytes
-                    is encoded as 4 base64 characters.  (3 * 8 bits = 24 bits of data) Then each of the 64 valid base64
-                    characters represents 6 bits of data (2 * 6 bits = 24 bits).  So 3 bytes in the input becomes 4
+                    is encoded as 4 base64 characters.  (3 * 8 bits = 24 bits of data) Then each of the 64 valid base64 characters represents 6 bits of data (2 * 6 bits = 24 bits).  So 3 bytes in the input becomes 4
                     characters in the output.</p>
                 <p>Which means to show "+1000+words+" in the encoded data, we need the 3-byte sequences which create the 
                     4-char values we want.</p>

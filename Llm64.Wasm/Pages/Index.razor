@@ -4,11 +4,20 @@
         <div class="upload-section">
             <label class="file-upload-label">
                 <div class="file-upload-content">
-                    <svg class="upload-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                    </svg>
-                    <span class="file-upload-text">@GetFileUploadText()</span>
-                    <span class="file-upload-hint">PNG files up to 5MB</span>
+                    @if (string.IsNullOrEmpty(originalImageData))
+                    {
+                        <svg class="upload-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        </svg>
+                        <span class="file-upload-text">Click to upload PNG</span>
+                        <span class="file-upload-hint">PNG files up to 5MB</span>
+                    }
+                    else
+                    {
+                        <img src="@originalImageData" alt="Uploaded PNG" class="uploaded-preview" />
+                        <span class="file-upload-text">@GetFileUploadText()</span>
+                        <span class="file-upload-hint">Click to change</span>
+                    }
                 </div>
                 <InputFile id="fileInput" OnChange="HandleFileSelected" accept=".png" class="file-input" />
             </label>
@@ -185,6 +194,14 @@
 
 .file-input {
     display: none;
+}
+
+.uploaded-preview {
+    max-width: 300px;
+    max-height: 200px;
+    object-fit: contain;
+    margin-bottom: 1rem;
+    border-radius: 8px;
 }
 
 .text-section {
@@ -569,10 +586,9 @@
         return true;
     }
 
-    private void HandleFileSelected(InputFileChangeEventArgs e)
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
     {
         uploadedFile = e.File;
-        originalImageData = null;
         processedImageData = null;
         originalMetadata = null;
         modifiedMetadata = null;
@@ -584,6 +600,26 @@
         {
             errorMessage = $"File size ({FormatFileSize(uploadedFile.Size)}) exceeds maximum allowed size of 5MB";
             uploadedFile = null;
+            originalImageData = null;
+        }
+        else
+        {
+            // Load and display the uploaded image
+            try
+            {
+                using var stream = uploadedFile.OpenReadStream(maxAllowedSize: maxFileSize);
+                using var memoryStream = new MemoryStream();
+                await stream.CopyToAsync(memoryStream);
+                byte[] pngData = memoryStream.ToArray();
+
+                string base64 = Convert.ToBase64String(pngData);
+                originalImageData = $"data:image/png;base64,{base64}";
+            }
+            catch (Exception ex)
+            {
+                errorMessage = $"Error loading image: {ex.Message}";
+                originalImageData = null;
+            }
         }
     }
 
