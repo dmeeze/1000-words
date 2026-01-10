@@ -60,7 +60,7 @@ if (!File.Exists(inputPath))
 
 try
 {
-    var pngHelper = new PngTool(Base64Mode.Standard);
+    var pngHelper = new PngHelper(Base64Mode.Standard);
     byte[] inputPng = File.ReadAllBytes(inputPath);
 
     if (!pngHelper.IsPng(inputPng))
@@ -70,7 +70,8 @@ try
     }
 
     // Normalize and show the lines that will be embedded
-    var normalizedLines = pngHelper.NormalizePrompt(message);
+    var base64Helper = new Base64Helper(Base64Mode.Standard);
+    var normalizedLines = base64Helper.NormalizeText(message);
     Console.WriteLine($"Embedding style: {style}");
     Console.WriteLine($"Normalized message ({normalizedLines.Count} line(s)):");
     foreach (var line in normalizedLines)

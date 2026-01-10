@@ -2,16 +2,6 @@ using System.Text;
 
 namespace Llm64.Wasm.Services;
 
-public record Base64Mode(string Chars, char? PaddingChar, char WhitespaceChar, char LinebreakChar)
-{
-    // RFC4648
-    public static readonly Base64Mode Standard =
-        new Base64Mode("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/", '=', '+', '/');
-    // RFC4648 Section 5 - TODO
-    public static readonly Base64Mode UrlSafe =
-        new Base64Mode("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_", null, '_', '-');
-};
-
 public enum EmbeddingStyle
 {
     /// <summary>
@@ -29,79 +19,61 @@ public enum EmbeddingStyle
     Compact,
 }
 
-public class PngTool
+public class PngHelper
 {
-    public PngTool(Base64Mode? mode)
+    public PngHelper(Base64Mode? mode = null)
     {
-        _mode = mode ?? Base64Mode.Standard;
-        _base64CharSet = new(_mode.Chars);
+        _base64Helper = new Base64Helper(mode);
     }
 
-    private readonly Base64Mode _mode;
-    private readonly HashSet<char> _base64CharSet;
+    private readonly Base64Helper _base64Helper;
     private static readonly byte[] PngSignature = { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
-    const int Base64DisplayLineWidth = 76;
     private const string PngHeaderChunkType = "IHDR";
     
     public bool IsPng(byte[] data) => (data.Length >= PngSignature.Length) && PngSignature.SequenceEqual(data.Take(PngSignature.Length));
-    
-    public List<string> NormalizePrompt(string prompt)
+
+    public (int width, int height) GetImageDimensions(byte[] pngData)
     {
-        var lines = new List<string>();
+        // PNG IHDR chunk starts at byte 16 (after signature and IHDR chunk header)
+        // Width is 4 bytes at offset 16, height is 4 bytes at offset 20
+        if (pngData.Length < 24)
+            return (0, 0);
 
-        // Split by newlines (preserve line breaks)
-        var inputLines = prompt.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+        int width = (pngData[16] << 24) | (pngData[17] << 16) | (pngData[18] << 8) | pngData[19];
+        int height = (pngData[20] << 24) | (pngData[21] << 16) | (pngData[22] << 8) | pngData[23];
 
-        foreach (var line in inputLines)
-        {
-            // Normalize each line: keep only valid base64 characters
-            var chars = new List<char>();
-            foreach (var c in line)
-            {
-                char? appendChar = c switch
-                {
-                    _ when char.IsWhiteSpace(c) => _mode.WhitespaceChar,
-                    _ when _base64CharSet.Contains(c) => c,
-                    _ => null
-                };
-
-                if (appendChar.HasValue) chars.Add(appendChar.Value);
-            }
-
-            lines.Add(new string(chars.ToArray()));
-        }
-
-        return lines;
+        return (width, height);
     }
+
 
     private string FormatLinesForEmail(List<string> lines)
     {
         var sb = new StringBuilder();
-        var empty = new string(_mode.WhitespaceChar, Base64DisplayLineWidth);
-        
+        var empty = new string(_base64Helper.Mode.WhitespaceChar, Base64Helper.StandardLineWidth);
+
         // three header lines
         sb.Append(empty);
         sb.Append(empty);
         sb.Append(empty);
-        
+
         foreach (var line in lines)
         {
             if (line.Length == 0)
             {
                 sb.Append(empty);
             }
-            else if (line.Length <= Base64DisplayLineWidth)
+            else if (line.Length <= Base64Helper.StandardLineWidth)
             {
-                sb.Append(line.PadRight(Base64DisplayLineWidth, _mode.WhitespaceChar));
+                sb.Append(line.PadRight(Base64Helper.StandardLineWidth, _base64Helper.Mode.WhitespaceChar));
             }
             else
             {
                 // poor-man's wrap (maybe we do word breaks one day)
-                for (var i = 0; i < line.Length; i += Base64DisplayLineWidth)
+                for (var i = 0; i < line.Length; i += Base64Helper.StandardLineWidth)
                 {
-                    var length = Math.Min(Base64DisplayLineWidth, line.Length - i);
+                    var length = Math.Min(Base64Helper.StandardLineWidth, line.Length - i);
                     var segment = line.Substring(i, length);
-                    sb.Append(segment.PadRight(Base64DisplayLineWidth, _mode.WhitespaceChar));
+                    sb.Append(segment.PadRight(Base64Helper.StandardLineWidth, _base64Helper.Mode.WhitespaceChar));
                 }
             }
         }
@@ -116,18 +88,18 @@ public class PngTool
     private string FormatLinesForCompact(List<string> lines)
     {
         var sb = new StringBuilder();
-        
+
         foreach (var line in lines)
         {
             if (line.Length == 0)
             {
-                sb.Append(_mode.LinebreakChar);
+                sb.Append(_base64Helper.Mode.LinebreakChar);
             }
             else
             {
                 // Pad to 76 chars
                 sb.Append(line);
-                sb.Append(_mode.LinebreakChar);
+                sb.Append(_base64Helper.Mode.LinebreakChar);
             }
         }
 
@@ -146,31 +118,69 @@ public class PngTool
         var chunkLength = (pngData[slopIndex] << 24) | (pngData[slopIndex + 1] << 16) |
                           (pngData[slopIndex + 2] << 8) | pngData[slopIndex + 3];
 
-        // Calculate alignment padding (same calculation as in InsertChunk)
         var bufferStartInPng = slopIndex + 8; // After length and type fields
-        var paddingToLineStart = (57 - (bufferStartInPng % 57)) % 57;
 
-        // Extract data portion, skipping alignment padding
-        var dataStart = slopIndex + 8 + paddingToLineStart;
-        var textBytesLength = chunkLength - paddingToLineStart;
+        // Try both Email and Compact styles to detect which was used
+        // We'll detect Email style by checking if there are multiple empty lines (padding lines)
 
-        if (textBytesLength <= 0) return null;
+        // First, try Email style with 57-byte boundary padding
+        var emailPaddingToLineStart = (57 - (bufferStartInPng % 57)) % 57;
+        var emailDataStart = bufferStartInPng + emailPaddingToLineStart;
+        var emailTextBytesLength = chunkLength - emailPaddingToLineStart;
 
-        var textBytes = new byte[textBytesLength];
-        Array.Copy(pngData, dataStart, textBytes, 0, textBytesLength);
+        // Then, try Compact style with 3-byte boundary padding
+        var compactPaddingToLineStart = (3 - (bufferStartInPng % 3)) % 3;
+        var compactDataStart = bufferStartInPng + compactPaddingToLineStart;
+        var compactTextBytesLength = chunkLength - compactPaddingToLineStart;
+
+        // Extract with Email style first
+        byte[] textBytes;
+
+        if (emailTextBytesLength > 0)
+        {
+            var emailTextBytes = new byte[emailTextBytesLength];
+            Array.Copy(pngData, emailDataStart, emailTextBytes, 0, emailTextBytesLength);
+            var emailBase64 = Convert.ToBase64String(emailTextBytes);
+            var emailLines = new List<string>();
+            for (var i = 0; i < emailBase64.Length; i += Base64Helper.StandardLineWidth)
+            {
+                var length = Math.Min(Base64Helper.StandardLineWidth, emailBase64.Length - i);
+                emailLines.Add(emailBase64.Substring(i, length));
+            }
+            var emailTrimmedLines = emailLines.Select(line => line.TrimEnd(_base64Helper.Mode.WhitespaceChar)).ToList();
+
+            // Check if we have multiple empty lines at the start (Email style signature)
+            var emptyLineCount = emailTrimmedLines.TakeWhile(line => string.IsNullOrEmpty(line)).Count();
+            if (emptyLineCount >= 2)
+            {
+                textBytes = emailTextBytes;
+            }
+            else
+            {
+                // Use Compact style
+                textBytes = new byte[compactTextBytesLength];
+                Array.Copy(pngData, compactDataStart, textBytes, 0, compactTextBytesLength);
+            }
+        }
+        else
+        {
+            // Use Compact style
+            textBytes = new byte[compactTextBytesLength];
+            Array.Copy(pngData, compactDataStart, textBytes, 0, compactTextBytesLength);
+        }
 
         // Convert to base64 and format at 76 chars per line
         var base64 = Convert.ToBase64String(textBytes);
         var lines = new List<string>();
 
-        for (var i = 0; i < base64.Length; i += Base64DisplayLineWidth)
+        for (var i = 0; i < base64.Length; i += Base64Helper.StandardLineWidth)
         {
-            var length = Math.Min(Base64DisplayLineWidth, base64.Length - i);
+            var length = Math.Min(Base64Helper.StandardLineWidth, base64.Length - i);
             lines.Add(base64.Substring(i, length));
         }
 
         // Trim padding characters from the right of each line
-        var trimmedLines = lines.Select(line => line.TrimEnd(_mode.WhitespaceChar)).ToList();
+        var trimmedLines = lines.Select(line => line.TrimEnd(_base64Helper.Mode.WhitespaceChar)).ToList();
 
         // Skip leading empty lines (padding header)
         while (trimmedLines.Count > 0 && string.IsNullOrEmpty(trimmedLines[0]))
@@ -191,8 +201,8 @@ public class PngTool
         // - LinebreakChar (/) → newline
         var decodedLines = trimmedLines.Select(line =>
         {
-            var decoded = line.Replace(_mode.WhitespaceChar, ' ');
-            decoded = decoded.Replace(_mode.LinebreakChar, '\n');
+            var decoded = line.Replace(_base64Helper.Mode.WhitespaceChar, ' ');
+            decoded = decoded.Replace(_base64Helper.Mode.LinebreakChar, '\n');
             return decoded;
         }).ToList();
 
@@ -213,6 +223,9 @@ public class PngTool
     {
         if (!IsPng(pngData)) throw new ArgumentException("Invalid PNG file", nameof(pngData));
 
+        // Remove all existing sLOP chunks before adding new one
+        pngData = RemoveAllChunks(pngData, "sLOP");
+
         // Find IHDR chunk
         var ihdrIndex = FindChunk(pngData, PngHeaderChunkType);
         if (ihdrIndex == -1) throw new Exception("Invalid PNG: Header chunk not found");
@@ -221,7 +234,7 @@ public class PngTool
         var insertPosition = ihdrIndex + 25;
 
         // Normalize and process lines for proper base64 layout
-        var normalizedLines = NormalizePrompt(text);
+        var normalizedLines = _base64Helper.NormalizeText(text);
         var embeddedText = style switch
         {
             EmbeddingStyle.Email => FormatLinesForEmail(normalizedLines),
@@ -229,7 +242,7 @@ public class PngTool
             _ => throw new InvalidOperationException()
         };
         // Insert empty buffer, then overwrite with correct bytes
-        return InsertChunk(pngData, embeddedText, insertPosition);
+        return InsertChunk(pngData, embeddedText, insertPosition, style);
     }
 
     private static int FindChunk(byte[] data, string chunkType)
@@ -244,6 +257,33 @@ public class PngTool
             }
         }
         return -1;
+    }
+
+    private static byte[] RemoveAllChunks(byte[] data, string chunkType)
+    {
+        var result = data;
+
+        // Keep removing chunks until none are found
+        while (true)
+        {
+            var chunkIndex = FindChunk(result, chunkType);
+            if (chunkIndex == -1) break; // No more chunks of this type
+
+            // Read chunk length (4 bytes, big-endian)
+            var chunkLength = (result[chunkIndex] << 24) | (result[chunkIndex + 1] << 16) |
+                              (result[chunkIndex + 2] << 8) | result[chunkIndex + 3];
+
+            // Chunk structure: length(4) + type(4) + data(chunkLength) + CRC(4)
+            var totalChunkSize = 4 + 4 + chunkLength + 4;
+
+            // Remove this chunk
+            var newData = new byte[result.Length - totalChunkSize];
+            Array.Copy(result, 0, newData, 0, chunkIndex);
+            Array.Copy(result, chunkIndex + totalChunkSize, newData, chunkIndex, result.Length - (chunkIndex + totalChunkSize));
+            result = newData;
+        }
+
+        return result;
     }
 
     private static byte[] GeneratePadding(int alignment, int finalByteSize)
@@ -275,27 +315,38 @@ public class PngTool
         return result.ToArray();
     }
 
-    private byte[] InsertChunk(byte[] pngData, string text, int insertPosition)
+    private byte[] InsertChunk(byte[] pngData, string text, int insertPosition, EmbeddingStyle style)
     {
         // Ensure text length is a multiple of 4 for proper base64 encoding
         var mod = text.Length % 4;
         if (mod != 0)
         {
-            text += new string(_mode.WhitespaceChar, 4 - mod);
+            text += new string(_base64Helper.Mode.WhitespaceChar, 4 - mod);
         }
 
         // Decode text to raw bytes
-        var rawBytes = ManuallyDecodeBase64(text);
+        var rawBytes = _base64Helper.ManuallyDecode(text);
 
         // Calculate where the buffer will start in the PNG
         // Chunk structure: length(4) + type(4) + data(N) + CRC(4)
         var bufferStartInPng = insertPosition + 8; // After length and type fields
 
-        // Calculate padding needed to align to 57-byte boundary
-        // Standard base64 wraps at 76 chars = 57 bytes
-        var currentPosition = bufferStartInPng;
-        var paddingToLineStart = (57 - (currentPosition % 57)) % 57;
-        
+        // Calculate padding needed based on style:
+        // - Email style: align to 57-byte boundary (76 base64 chars = 57 bytes)
+        //   This makes text start on a new line in email-style base64
+        // - Compact style: align to 3-byte boundary only
+        //   This makes text appear verbatim but not necessarily at line starts
+        var paddingToLineStart = 0;
+        if (style == EmbeddingStyle.Email)
+        {
+            paddingToLineStart = (57 - (bufferStartInPng % 57)) % 57;
+        }
+        else
+        {
+            // For Compact style, just align to 3-byte boundary
+            paddingToLineStart = (3 - (bufferStartInPng % 3)) % 3;
+        }
+
         // Calculate total buffer size
         var totalBufferSize = paddingToLineStart + rawBytes.Length;
 
@@ -314,10 +365,13 @@ public class PngTool
         // Now overwrite the buffer with actual content
         var writePosition = bufferStartInPng;
 
-        // Generate padding before text (alignment-aware for base64)
-        var paddingBeforeBytes = GeneratePadding(writePosition % 3, paddingToLineStart);
-        Array.Copy(paddingBeforeBytes, 0, tempPng, writePosition, paddingBeforeBytes.Length);
-        writePosition += paddingBeforeBytes.Length;
+        // Generate padding before text (alignment-aware for base64) - only for Email style
+        if (paddingToLineStart > 0)
+        {
+            var paddingBeforeBytes = GeneratePadding(writePosition % 3, paddingToLineStart);
+            Array.Copy(paddingBeforeBytes, 0, tempPng, writePosition, paddingBeforeBytes.Length);
+            writePosition += paddingBeforeBytes.Length;
+        }
 
         // Write the raw bytes
         Array.Copy(rawBytes, 0, tempPng, writePosition, rawBytes.Length);
@@ -356,46 +410,6 @@ public class PngTool
         writer.Write(BitConverter.GetBytes(crc).Reverse().ToArray());
 
         return ms.ToArray();
-    }
-
-    private byte[] ManuallyDecodeBase64(string text)
-    {
-        // Convert each character to its 6-bit value
-        var bits = new List<bool>();
-        foreach (var c in text)
-        {
-            if (c == _mode.PaddingChar || char.IsWhiteSpace(c)) continue; // Skip padding and spaces
-
-            var value = _mode.Chars.IndexOf(c);
-            if (value == -1)
-            {
-                // Invalid base64 character, skip or use 0
-                value = 0;
-            }
-
-            // Add 6 bits
-            for (var i = 5; i >= 0; i--)
-            {
-                bits.Add((value & (1 << i)) != 0);
-            }
-        }
-
-        // Convert bits to bytes (8 bits per byte)
-        var bytes = new List<byte>();
-        for (var i = 0; i + 7 < bits.Count; i += 8)
-        {
-            byte b = 0;
-            for (var j = 0; j < 8; j++)
-            {
-                if (bits[i + j])
-                {
-                    b |= (byte)(1 << (7 - j));
-                }
-            }
-            bytes.Add(b);
-        }
-
-        return bytes.ToArray();
     }
 
     private static uint CalculateCrc32(byte[] data)

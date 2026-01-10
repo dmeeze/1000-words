@@ -647,10 +647,11 @@
                 byte[] pngData = memoryStream.ToArray();
 
                 string base64 = Convert.ToBase64String(pngData);
+                // oh look it's a data url format :)
                 originalImageData = $"data:image/png;base64,{base64}";
 
                 // Check if the image already has embedded text
-                var pngHelper = new PngTool(Base64Mode.Standard);
+                var pngHelper = new PngHelper(Base64Mode.Standard);
                 var extractedText = pngHelper.ExtractEmbeddedText(pngData);
 
                 if (!string.IsNullOrEmpty(extractedText))
@@ -687,34 +688,6 @@
         showBase64 = !showBase64;
     }
 
-    private (int width, int height) GetImageDimensions(byte[] pngData)
-    {
-        // PNG IHDR chunk starts at byte 16 (after signature and IHDR chunk header)
-        // Width is 4 bytes at offset 16, height is 4 bytes at offset 20
-        if (pngData.Length < 24)
-            return (0, 0);
-
-        int width = (pngData[16] << 24) | (pngData[17] << 16) | (pngData[18] << 8) | pngData[19];
-        int height = (pngData[20] << 24) | (pngData[21] << 16) | (pngData[22] << 8) | pngData[23];
-
-        return (width, height);
-    }
-
-    private string FormatBase64WithLineBreaks(string base64)
-    {
-        // Format base64 at 76 characters per line (RFC 2045 standard for email)
-        const int lineLength = 76;
-        var result = new System.Text.StringBuilder();
-
-        for (int i = 0; i < base64.Length; i += lineLength)
-        {
-            int length = Math.Min(lineLength, base64.Length - i);
-            result.AppendLine(base64.Substring(i, length));
-        }
-
-        return result.ToString();
-    }
-
     private async Task ProcessImage()
     {
         if (uploadedFile == null || string.IsNullOrWhiteSpace(textPrompt))
@@ -724,7 +697,7 @@
         errorMessage = null;
         StateHasChanged();
 
-        var pngHelper = new PngTool(Base64Mode.Standard);
+        var pngHelper = new PngHelper(Base64Mode.Standard);
 
         try
         {
@@ -758,10 +731,11 @@
 
             // Store original image
             string originalBase64 = Convert.ToBase64String(pngData);
+            // oh look it's a data url format :)
             originalImageData = $"data:image/png;base64,{originalBase64}";
 
             // Get original image dimensions
-            var (origWidth, origHeight) = GetImageDimensions(pngData);
+            var (origWidth, origHeight) = pngHelper.GetImageDimensions(pngData);
             originalMetadata = $"{origWidth} × {origHeight} • {pngData.Length:N0} bytes";
 
             // Modify PNG to include the text in base64
@@ -769,14 +743,16 @@
 
             // Convert to base64 data URL
             string base64 = Convert.ToBase64String(modifiedPng);
+            // and again, it's a data url format :)
             processedImageData = $"data:image/png;base64,{base64}";
 
             // Get modified image dimensions
-            var (modWidth, modHeight) = GetImageDimensions(modifiedPng);
+            var (modWidth, modHeight) = pngHelper.GetImageDimensions(modifiedPng);
             modifiedMetadata = $"{modWidth} × {modHeight} • {modifiedPng.Length:N0} bytes";
 
             // Format base64 at 76 characters per line and take first 50 lines
-            string fullBase64 = FormatBase64WithLineBreaks(base64);
+            var base64Helper = new Base64Helper();
+            string fullBase64 = base64Helper.FormatWithLineBreaks(base64);
             var lines = fullBase64.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
             base64Excerpt = string.Join("\n", lines.Take(50));
 
