@@ -48,7 +48,21 @@
         You can choose to <a href="" class="reload">Reload</a> or <a class="dismiss">dismiss</a>, or maybe just head across to the
         <a href="about.html">What is this?</a> page to see what is going on here.
     </div>
-    <script src="_framework/blazor.webassembly.js?v=__VERSION__"></script>
+    <script>
+        window.__BLAZOR_VERSION__ = '__VERSION__';
+    </script>
+    <script src="_framework/blazor.webassembly.js?v=__VERSION__" autostart="false"></script>
+    <script>
+        Blazor.start({
+            loadBootResource: function (type, name, defaultUri, integrity) {
+                // Cache-bust only the dotnet.js bootstrapping resources
+                if (name.startsWith('dotnet.') && name.endsWith('.js')) {
+                    return defaultUri + '?v=' + window.__BLAZOR_VERSION__;
+                }
+                return defaultUri;
+            }
+        });
+    </script>
 </body>
 
 </html>
