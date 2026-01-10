@@ -115,14 +115,18 @@ jobs:
         # Sync files to S3 with optimized cache control
         # CSS files now have version query strings (?v=hash) for cache busting
         # HTML files are always fetched fresh to get new version references
+        # Blazor loader scripts (_framework/blazor.webassembly.js and _framework/dotnet.js) also need short cache
+        # since they bootstrap the application and have version query strings
         if [ "${{ steps.vars.outputs.base_href }}" = "/" ]; then
-          # Root deployment - Static assets with long cache
+          # Root deployment - Static assets with long cache (excluding HTML and Blazor loaders)
           aws s3 sync "${PUBLISH_PATH}/" "s3://${{ steps.vars.outputs.s3_bucket }}/" \
             --delete \
             --cache-control "public, max-age=31536000, immutable" \
             --exclude "*.html" \
             --exclude "manifest.json" \
-            --exclude "sw.js"
+            --exclude "sw.js" \
+            --exclude "_framework/blazor.webassembly.js" \
+            --exclude "_framework/dotnet.js"
 
           # Root deployment - HTML files with short cache
           aws s3 sync "${PUBLISH_PATH}/" "s3://${{ steps.vars.outputs.s3_bucket }}/" \
@@ -130,8 +134,15 @@ jobs:
             --include "*.html" \
             --include "manifest.json" \
             --include "sw.js"
+
+          # Root deployment - Blazor loader scripts with short cache
+          aws s3 sync "${PUBLISH_PATH}/" "s3://${{ steps.vars.outputs.s3_bucket }}/" \
+            --cache-control "public, max-age=300, must-revalidate" \
+            --exclude "*" \
+            --include "_framework/blazor.webassembly.js" \
+            --include "_framework/dotnet.js"
         else
-          # Subpath deployment - Static assets with long cache
+          # Subpath deployment - Static assets with long cache (excluding HTML and Blazor loaders)
           SUBDIR=$(echo "${{ steps.vars.outputs.base_href }}" | sed 's|^/||' | sed 's|/$||')
 
           aws s3 sync "${PUBLISH_PATH}/" "s3://${{ steps.vars.outputs.s3_bucket }}/${SUBDIR}/" \
@@ -139,7 +150,9 @@ jobs:
             --cache-control "public, max-age=31536000, immutable" \
             --exclude "*.html" \
             --exclude "manifest.json" \
-            --exclude "sw.js"
+            --exclude "sw.js" \
+            --exclude "_framework/blazor.webassembly.js" \
+            --exclude "_framework/dotnet.js"
 
           # Subpath deployment - HTML files with short cache
           aws s3 sync "${PUBLISH_PATH}/" "s3://${{ steps.vars.outputs.s3_bucket }}/${SUBDIR}/" \
@@ -147,6 +160,13 @@ jobs:
             --include "*.html" \
             --include "manifest.json" \
             --include "sw.js"
+
+          # Subpath deployment - Blazor loader scripts with short cache
+          aws s3 sync "${PUBLISH_PATH}/" "s3://${{ steps.vars.outputs.s3_bucket }}/${SUBDIR}/" \
+            --cache-control "public, max-age=300, must-revalidate" \
+            --exclude "*" \
+            --include "_framework/blazor.webassembly.js" \
+            --include "_framework/dotnet.js"
         fi
 
     - name: Invalidate CloudFront cache
