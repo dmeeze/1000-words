@@ -41,6 +41,20 @@ a:visited {
     font-weight: 500;
 }
 
+#blazor-error-ui a {
+    color: white;
+    text-decoration: underline;
+    font-weight: 600;
+}
+
+#blazor-error-ui a:hover {
+    color: #f5f5dc;
+}
+
+#blazor-error-ui a:visited {
+    color: white;
+}
+
 #blazor-error-ui .dismiss {
     cursor: pointer;
     position: absolute;

@@ -79,19 +79,25 @@ jobs:
 
     - name: Build and publish
       run: |
-        # Set build timestamp
+        # Set build timestamp and version for cache busting
         BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        VERSION=$(git rev-parse --short HEAD)
         echo "Build timestamp: $BUILD_TIME"
+        echo "Version (git hash): $VERSION"
 
         dotnet publish Llm64.Wasm/Llm64.Wasm.csproj -c Release -o publish -p:BaseHref="${{ steps.vars.outputs.base_href }}"
 
         # Blazor WASM always publishes to wwwroot directly
         PUBLISH_PATH="publish/wwwroot"
 
-        # Replace base href token in all HTML files
+        # Replace tokens in all HTML files
         echo "Replacing __BASE_HREF__ with ${{ steps.vars.outputs.base_href }} in HTML files..."
         find "${PUBLISH_PATH}" -name "*.html" -type f -exec sed -i 's|__BASE_HREF__|${{ steps.vars.outputs.base_href }}|g' {} \;
-        echo "Updated base href in all HTML files"
+
+        echo "Replacing __VERSION__ with ${VERSION} in HTML files for cache busting..."
+        find "${PUBLISH_PATH}" -name "*.html" -type f -exec sed -i "s|__VERSION__|${VERSION}|g" {} \;
+
+        echo "Updated base href and version in all HTML files"
 
         echo "PUBLISH_PATH=${PUBLISH_PATH}" >> $GITHUB_ENV
         echo "Publishing from: ${PUBLISH_PATH}"
@@ -106,9 +112,11 @@ jobs:
 
     - name: Deploy to S3
       run: |
-        # Sync files to S3
+        # Sync files to S3 with optimized cache control
+        # CSS files now have version query strings (?v=hash) for cache busting
+        # HTML files are always fetched fresh to get new version references
         if [ "${{ steps.vars.outputs.base_href }}" = "/" ]; then
-          # Root deployment
+          # Root deployment - Static assets with long cache
           aws s3 sync "${PUBLISH_PATH}/" "s3://${{ steps.vars.outputs.s3_bucket }}/" \
             --delete \
             --cache-control "public, max-age=31536000, immutable" \
@@ -116,14 +124,14 @@ jobs:
             --exclude "manifest.json" \
             --exclude "sw.js"
 
-          # Upload HTML files with no-cache
+          # Root deployment - HTML files with short cache
           aws s3 sync "${PUBLISH_PATH}/" "s3://${{ steps.vars.outputs.s3_bucket }}/" \
-            --cache-control "public, max-age=0, must-revalidate" \
+            --cache-control "public, max-age=300, must-revalidate" \
             --include "*.html" \
             --include "manifest.json" \
             --include "sw.js"
         else
-          # Subpath deployment
+          # Subpath deployment - Static assets with long cache
           SUBDIR=$(echo "${{ steps.vars.outputs.base_href }}" | sed 's|^/||' | sed 's|/$||')
 
           aws s3 sync "${PUBLISH_PATH}/" "s3://${{ steps.vars.outputs.s3_bucket }}/${SUBDIR}/" \
@@ -133,9 +141,9 @@ jobs:
             --exclude "manifest.json" \
             --exclude "sw.js"
 
-          # Upload HTML files with no-cache
+          # Subpath deployment - HTML files with short cache
           aws s3 sync "${PUBLISH_PATH}/" "s3://${{ steps.vars.outputs.s3_bucket }}/${SUBDIR}/" \
-            --cache-control "public, max-age=0, must-revalidate" \
+            --cache-control "public, max-age=300, must-revalidate" \
             --include "*.html" \
             --include "manifest.json" \
             --include "sw.js"

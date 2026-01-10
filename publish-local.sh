@@ -5,7 +5,10 @@
 
 BASE_HREF="${1:-/}"
 
-echo "Publishing Blazor WASM app with BASE_HREF=${BASE_HREF}..."
+# Get git commit hash for cache busting
+VERSION=$(git rev-parse --short HEAD 2>/dev/null || echo "dev")
+
+echo "Publishing Blazor WASM app with BASE_HREF=${BASE_HREF} and VERSION=${VERSION}..."
 
 # Clean previous publish
 rm -rf publish
@@ -13,9 +16,12 @@ rm -rf publish
 # Publish the app
 dotnet publish Llm64.Wasm/Llm64.Wasm.csproj -c Release -o publish -p:BaseHref="${BASE_HREF}"
 
-# Replace __BASE_HREF__ placeholder in all HTML files
+# Replace placeholders in all HTML files
 echo "Replacing __BASE_HREF__ with ${BASE_HREF} in HTML files..."
 find publish/wwwroot -name "*.html" -type f -exec sed -i '' "s|__BASE_HREF__|${BASE_HREF}|g" {} \;
+
+echo "Replacing __VERSION__ with ${VERSION} in HTML files..."
+find publish/wwwroot -name "*.html" -type f -exec sed -i '' "s|__VERSION__|${VERSION}|g" {} \;
 
 echo ""
 echo "✅ Published successfully to: publish/wwwroot"
