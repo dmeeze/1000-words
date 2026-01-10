@@ -1,24 +1,23 @@
-@page "/"
-@using Llm64.Services
+@using Llm64.Wasm.Services
 
-<PageTitle>1000 Words</PageTitle>
-
-<div class="app-container">
-    <div class="hero">
-        <h1 class="title">1000 Words</h1>
-        <p class="subtitle">Make text show up when a PNG is shown in base64</p>
-        <p class="tagline">Because when a picture already has a thousand words... whats a few more?</p>
-    </div>
-
-    <div class="main-card">
+<div class="main-card">
         <div class="upload-section">
             <label class="file-upload-label">
                 <div class="file-upload-content">
-                    <svg class="upload-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                    </svg>
-                    <span class="file-upload-text">@GetFileUploadText()</span>
-                    <span class="file-upload-hint">PNG files up to 5MB</span>
+                    @if (string.IsNullOrEmpty(originalImageData))
+                    {
+                        <svg class="upload-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        </svg>
+                        <span class="file-upload-text">Click to upload PNG</span>
+                        <span class="file-upload-hint">PNG files up to 5MB</span>
+                    }
+                    else
+                    {
+                        <img src="@originalImageData" alt="Uploaded PNG" class="uploaded-preview" />
+                        <span class="file-upload-text">@GetFileUploadText()</span>
+                        <span class="file-upload-hint">Click to change</span>
+                    }
                 </div>
                 <InputFile id="fileInput" OnChange="HandleFileSelected" accept=".png" class="file-input" />
             </label>
@@ -26,6 +25,15 @@
 
         <div class="text-section">
             <label for="promptInput" class="text-label">Your Text</label>
+            @if (!string.IsNullOrEmpty(embeddedTextMessage))
+            {
+                <div class="info-message">
+                    <svg class="info-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" />
+                    </svg>
+                    @embeddedTextMessage
+                </div>
+            }
             <textarea
                 id="promptInput"
                 @bind="textPrompt"
@@ -35,6 +43,30 @@
                 class="text-input"
                 placeholder="Enter any text to embed in the PNG... (up to 5MB)"></textarea>
             <div class="text-counter">@GetTextSize() / 5MB</div>
+        </div>
+
+        <div class="style-section">
+            <label class="text-label">Embedding Style</label>
+            <div class="radio-group">
+                <label class="radio-option">
+                    <input type="radio" name="embeddingStyle" value="@EmbeddingStyle.Email"
+                           checked="@(selectedStyle == EmbeddingStyle.Email)"
+                           @onchange="@(() => selectedStyle = EmbeddingStyle.Email)" />
+                    <span class="radio-label">
+                        <strong>Email (Recommended)</strong>
+                        <span class="radio-description">76-character blocks with padding and line breaks (RFC 2045)</span>
+                    </span>
+                </label>
+                <label class="radio-option">
+                    <input type="radio" name="embeddingStyle" value="@EmbeddingStyle.Compact"
+                           checked="@(selectedStyle == EmbeddingStyle.Compact)"
+                           @onchange="@(() => selectedStyle = EmbeddingStyle.Compact)" />
+                    <span class="radio-label">
+                        <strong>Compact</strong>
+                        <span class="radio-description">Minimal padding for inline data URLs</span>
+                    </span>
+                </label>
+            </div>
         </div>
 
         <button
@@ -109,53 +141,15 @@
                 </div>
             </div>
         }
-    </div>
 </div>
 
 <style>
-.app-container {
-    max-width: 900px;
-    margin: 0 auto;
-    padding: 2rem 1rem;
-}
-
-.hero {
-    text-align: center;
-    margin-bottom: 3rem;
-    animation: fadeInDown 0.8s ease-out;
-}
-
-.title {
-    font-size: 4rem;
-    font-weight: 800;
-    background: linear-gradient(135deg, #fff 0%, #f5f5dc 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    margin-bottom: 0.5rem;
-    text-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-}
-
-.subtitle {
-    font-size: 1.25rem;
-    color: #2c1810;
-    margin-bottom: 0.5rem;
-    font-weight: 500;
-}
-
-.tagline {
-    font-size: 0.95rem;
-    color: #3d2817;
-    font-style: italic;
-}
-
 .main-card {
     background: rgba(255, 255, 255, 0.95);
     backdrop-filter: blur(10px);
     border-radius: 24px;
     padding: 2.5rem;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
-    animation: fadeInUp 0.8s ease-out;
 }
 
 .upload-section {
@@ -211,6 +205,14 @@
     display: none;
 }
 
+.uploaded-preview {
+    max-width: 300px;
+    max-height: 200px;
+    object-fit: contain;
+    margin-bottom: 1rem;
+    border-radius: 8px;
+}
+
 .text-section {
     margin-bottom: 2rem;
 }
@@ -249,18 +251,71 @@
     margin-top: 0.5rem;
 }
 
+.style-section {
+    margin-bottom: 2rem;
+}
+
+.radio-group {
+    display: flex;
+    flex-direction: row;
+    gap: 0.75rem;
+}
+
+.radio-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.75rem;
+    border: 2px solid #e2e8f0;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.3s;
+    background: #f8fafc;
+    flex: 1;
+}
+
+.radio-option:hover {
+    border-color: #4a90a4;
+    background: white;
+}
+
+.radio-option input[type="radio"] {
+    margin-top: 0.25rem;
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    accent-color: #4a90a4;
+}
+
+.radio-label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.radio-label strong {
+    color: #1e293b;
+    font-size: 1rem;
+}
+
+.radio-description {
+    color: #64748b;
+    font-size: 0.875rem;
+    font-weight: normal;
+}
+
 .process-button {
     width: 100%;
     padding: 1rem 2rem;
     font-size: 1.125rem;
     font-weight: 600;
     color: white;
-    background: linear-gradient(135deg, #d2b48c 0%, #4a90a4 100%);
+    background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%);
     border: none;
     border-radius: 12px;
     cursor: pointer;
     transition: all 0.3s;
-    box-shadow: 0 4px 12px rgba(74, 144, 164, 0.3);
+    box-shadow: 0 4px 12px rgba(184, 134, 11, 0.4);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -269,7 +324,7 @@
 
 .process-button:hover:not(:disabled) {
     transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(74, 144, 164, 0.4);
+    box-shadow: 0 6px 20px rgba(184, 134, 11, 0.5);
 }
 
 .process-button:disabled {
@@ -303,6 +358,24 @@
 }
 
 .error-icon {
+    width: 24px;
+    height: 24px;
+    flex-shrink: 0;
+}
+
+.info-message {
+    background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+    color: #1e40af;
+    padding: 1rem 1.25rem;
+    border-radius: 12px;
+    margin-bottom: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    border: 2px solid #93c5fd;
+}
+
+.info-icon {
     width: 24px;
     height: 24px;
     flex-shrink: 0;
@@ -446,28 +519,6 @@
     box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
-@@keyframes fadeInDown {
-    from {
-        opacity: 0;
-        transform: translateY(-20px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-@@keyframes fadeInUp {
-    from {
-        opacity: 0;
-        transform: translateY(20px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
 @@keyframes fadeIn {
     from { opacity: 0; }
     to { opacity: 1; }
@@ -489,21 +540,13 @@
     .image-comparison {
         grid-template-columns: 1fr;
     }
+
+    .radio-group {
+        flex-direction: column;
+    }
 }
 
 @@media (max-width: 640px) {
-    .app-container {
-        padding: 1rem 0.75rem;
-    }
-
-    .title {
-        font-size: 2.5rem;
-    }
-
-    .subtitle {
-        font-size: 1rem;
-    }
-
     .main-card {
         padding: 1.5rem;
         border-radius: 16px;
@@ -523,6 +566,7 @@
 @code {
     private IBrowserFile? uploadedFile;
     private string textPrompt = "";
+    private EmbeddingStyle selectedStyle = EmbeddingStyle.Email;
     private string? originalImageData;
     private string? processedImageData;
     private string? originalMetadata;
@@ -531,6 +575,7 @@
     private string? errorMessage;
     private bool isProcessing;
     private bool showBase64;
+    private string? embeddedTextMessage;
 
     private const long maxFileSize = 5 * 1024 * 1024; // 5MB
     private const int maxTextSize = 5 * 1024 * 1024; // 5MB
@@ -574,21 +619,51 @@
         return true;
     }
 
-    private void HandleFileSelected(InputFileChangeEventArgs e)
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
     {
         uploadedFile = e.File;
-        originalImageData = null;
         processedImageData = null;
         originalMetadata = null;
         modifiedMetadata = null;
         base64Excerpt = null;
         errorMessage = null;
         showBase64 = false;
+        embeddedTextMessage = null;
 
         if (uploadedFile.Size > maxFileSize)
         {
             errorMessage = $"File size ({FormatFileSize(uploadedFile.Size)}) exceeds maximum allowed size of 5MB";
             uploadedFile = null;
+            originalImageData = null;
+        }
+        else
+        {
+            // Load and display the uploaded image
+            try
+            {
+                using var stream = uploadedFile.OpenReadStream(maxAllowedSize: maxFileSize);
+                using var memoryStream = new MemoryStream();
+                await stream.CopyToAsync(memoryStream);
+                byte[] pngData = memoryStream.ToArray();
+
+                string base64 = Convert.ToBase64String(pngData);
+                originalImageData = $"data:image/png;base64,{base64}";
+
+                // Check if the image already has embedded text
+                var pngHelper = new PngTool(Base64Mode.Standard);
+                var extractedText = pngHelper.ExtractEmbeddedText(pngData);
+
+                if (!string.IsNullOrEmpty(extractedText))
+                {
+                    textPrompt = extractedText;
+                    embeddedTextMessage = "This image already has embedded text in it!";
+                }
+            }
+            catch (Exception ex)
+            {
+                errorMessage = $"Error loading image: {ex.Message}";
+                originalImageData = null;
+            }
         }
     }
 
@@ -649,6 +724,8 @@
         errorMessage = null;
         StateHasChanged();
 
+        var pngHelper = new PngTool(Base64Mode.Standard);
+
         try
         {
             // Validate file size
@@ -673,7 +750,7 @@
             byte[] pngData = memoryStream.ToArray();
 
             // Validate PNG
-            if (!PngTextEmbedder.IsPng(pngData))
+            if (!pngHelper.IsPng(pngData))
             {
                 errorMessage = "Invalid PNG file. Please upload a valid PNG image.";
                 return;
@@ -688,7 +765,7 @@
             originalMetadata = $"{origWidth} × {origHeight} • {pngData.Length:N0} bytes";
 
             // Modify PNG to include the text in base64
-            byte[] modifiedPng = PngTextEmbedder.EmbedTextInPng(pngData, textPrompt);
+            byte[] modifiedPng = pngHelper.EmbedTextInPng(pngData, textPrompt, selectedStyle);
 
             // Convert to base64 data URL
             string base64 = Convert.ToBase64String(modifiedPng);

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>One Thousand Words</title>
+    <base href="__BASE_HREF__" />
+    <link href="css/common.css" rel="stylesheet" />
+</head>
+
+<body>
+    <!-- Navigation -->
+    <input type="checkbox" id="hamburger-toggle" class="hamburger-toggle">
+    <label for="hamburger-toggle" class="hamburger-menu">
+        <span class="hamburger-line"></span>
+        <span class="hamburger-line"></span>
+        <span class="hamburger-line"></span>
+    </label>
+    <nav class="nav-overlay">
+        <a href="index.html" class="nav-brand">One thousand words</a>
+        <div class="nav-links">
+            <a href="index.html" class="nav-link">Home</a>
+            <a href="about.html" class="nav-link">What is this?</a>
+            <a href="https://github.com/dmeeze/1000-words" class="nav-link" target="_blank" rel="noopener noreferrer">GitHub</a>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="app-container">
+        <!-- Hero Section -->
+        <div class="hero">
+            <img src="img/Mona_Lisa_300x400.png" 
+                 alt="Mona Lisa - Modified from original - Original by Wikimedia user Pedemann - CC BY-SA 4.0 https://commons.wikimedia.org/wiki/File:Mona_Lisa_Louvre_2025.jpg#Licensing" 
+                 class="hero-image">
+            <div class="hero-content">
+                <h1 class="title">One thousand words</h1>
+                <p class="subtitle">Make your pictures worth even more words (<a href="about.html">explain more</a>)</p>
+            </div>
+        </div>
+
+        <!-- Blazor App Component -->
+        <div id="app">Loading...</div>
+    </div>
+
+    <div id="blazor-error-ui">
+        This site uses a Blazor control, and something has gone wrong loading it, sorry.<br/>
+        Yoiu can choose to <a href="" class="reload">Reload</a> or <a class="dismiss">dismiss</a>, or maybe just head across to the
+        <a href="about.html" class="nav-link">What is this?</a> page to see what is going on here.
+    </div>
+    <script src="_framework/blazor.webassembly.js"></script>
+</body>
+
+</html>
