@@ -2,21 +2,50 @@ using System.Text;
 
 namespace Llm64.Wasm.Services;
 
-public class PngTextEmbedder
+public record Base64Mode(string Chars, char? PaddingChar, char WhitespaceChar, char LinebreakChar)
 {
+    // RFC4648
+    public static readonly Base64Mode Standard =
+        new Base64Mode("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/", '=', '+', '/');
+    // RFC4648 Section 5
+    public static readonly Base64Mode UrlSafe =
+        new Base64Mode("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_", null, '_', '-');
+};
+
+public enum EmbeddingStyle
+{
+    /// <summary>
+    /// RFC 2045 : formatted as 76-character blocks separated by newlines
+    /// eg:
+    /// Foo+++++++++
+    /// Bar+Baz+++++
+    /// </summary>
+    Email,
+    /// <summary>
+    /// Minimal padding used for inline data: urls
+    /// eg:
+    /// +++Foo/Bar+Baz+++
+    /// </summary>
+    Compact,
+}
+
+public class PngTool
+{
+    public PngTool(Base64Mode? mode)
+    {
+        _mode = mode ?? Base64Mode.Standard;
+        _base64CharSet = new(_mode.Chars);
+    }
+
+    private readonly Base64Mode _mode;
+    private readonly HashSet<char> _base64CharSet;
     private static readonly byte[] PngSignature = { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
-    private const string Base64Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
     const int Base64DisplayLineWidth = 76;
     private const string PngHeaderChunkType = "IHDR";
-    private static readonly HashSet<char> Base64CharSet = new(Base64Chars);
     
-    public static bool IsPng(byte[] data)
-    {
-        if (data.Length < 8) return false;
-        return data.Take(8).SequenceEqual(PngSignature);
-    }
+    public bool IsPng(byte[] data) => (data.Length >= PngSignature.Length) && PngSignature.SequenceEqual(data.Take(PngSignature.Length));
     
-    public static List<string> NormalizePrompt(string prompt)
+    public List<string> NormalizePrompt(string prompt)
     {
         var lines = new List<string>();
 
@@ -31,8 +60,8 @@ public class PngTextEmbedder
             {
                 char? appendChar = c switch
                 {
-                    _ when char.IsWhiteSpace(c) => '+', // whitespace to plus
-                    _ when Base64CharSet.Contains(c) => c,
+                    _ when char.IsWhiteSpace(c) => _mode.WhitespaceChar,
+                    _ when _base64CharSet.Contains(c) => c,
                     _ => null
                 };
 
@@ -45,7 +74,46 @@ public class PngTextEmbedder
         return lines;
     }
 
-    private static string ProcessLinesForEmbedding(List<string> lines)
+    private string FormatLinesForEmail(List<string> lines)
+    {
+        var sb = new StringBuilder();
+        var empty = new string(_mode.WhitespaceChar, Base64DisplayLineWidth);
+        
+        // three header lines
+        sb.Append(empty);
+        sb.Append(empty);
+        sb.Append(empty);
+        
+        foreach (var line in lines)
+        {
+            if (line.Length == 0)
+            {
+                sb.Append(empty);
+            }
+            else if (line.Length <= Base64DisplayLineWidth)
+            {
+                sb.Append(line.PadRight(Base64DisplayLineWidth, _mode.WhitespaceChar));
+            }
+            else
+            {
+                // poor-man's wrap (maybe we do word breaks one day)
+                for (int i = 0; i < line.Length; i += Base64DisplayLineWidth)
+                {
+                    int length = Math.Min(Base64DisplayLineWidth, line.Length - i);
+                    string segment = line.Substring(i, length);
+                    sb.Append(segment.PadRight(Base64DisplayLineWidth, _mode.WhitespaceChar));
+                }
+            }
+        }
+        // three footer lines
+        sb.Append(empty);
+        sb.Append(empty);
+        sb.Append(empty);
+
+        return sb.ToString();
+    }
+    
+    private string FormatLinesForCompact(List<string> lines)
     {
         var sb = new StringBuilder();
         
@@ -53,51 +121,40 @@ public class PngTextEmbedder
         {
             if (line.Length == 0)
             {
-                // Empty line becomes a line of padding
-                sb.Append(new string('+', Base64DisplayLineWidth));
-            }
-            else if (line.Length <= Base64DisplayLineWidth)
-            {
-                // Pad to 76 chars
-                sb.Append(line.PadRight(Base64DisplayLineWidth, '+'));
+                sb.Append(_mode.LinebreakChar);
             }
             else
             {
-                // Wrap
-                for (int i = 0; i < line.Length; i += Base64DisplayLineWidth)
-                {
-                    int length = Math.Min(Base64DisplayLineWidth, line.Length - i);
-                    string segment = line.Substring(i, length);
-                    sb.Append(segment.PadRight(Base64DisplayLineWidth, '+'));
-                }
+                // Pad to 76 chars
+                sb.Append(line);
+                sb.Append(_mode.LinebreakChar);
             }
         }
 
         return sb.ToString();
     }
 
-    public static byte[] EmbedTextInPng(byte[] pngData, string text)
+    public byte[] EmbedTextInPng(byte[] pngData, string text, EmbeddingStyle style)
     {
-        if (!IsPng(pngData))
-        {
-            throw new ArgumentException("Invalid PNG file", nameof(pngData));
-        }
+        if (!IsPng(pngData)) throw new ArgumentException("Invalid PNG file", nameof(pngData));
 
-        // Find IHDR chunk (always starts at byte 8 after PNG signature)
+        // Find IHDR chunk
         int ihdrIndex = FindChunk(pngData, PngHeaderChunkType);
-        if (ihdrIndex == -1)
-        {
-            throw new Exception("Invalid PNG: Header chunk not found");
-        }
+        if (ihdrIndex == -1) throw new Exception("Invalid PNG: Header chunk not found");
 
         // IHDR chunk structure: length(4) + type(4) + data(13) + CRC(4) = 25 bytes
         int insertPosition = ihdrIndex + 25;
 
         // Normalize and process lines for proper base64 layout
         var normalizedLines = NormalizePrompt(text);
-        var embeddedText = ProcessLinesForEmbedding(normalizedLines);
+        var embeddedText = style switch
+        {
+            EmbeddingStyle.Email => FormatLinesForEmail(normalizedLines),
+            EmbeddingStyle.Compact => FormatLinesForCompact(normalizedLines),
+            _ => throw new InvalidOperationException()
+        };
         // Insert empty buffer, then overwrite with correct bytes
-        return EmbedTextWithOverwrite(pngData, embeddedText, insertPosition);
+        return InsertChunk(pngData, embeddedText, insertPosition);
     }
 
     private static int FindChunk(byte[] data, string chunkType)
@@ -114,17 +171,12 @@ public class PngTextEmbedder
         return -1;
     }
 
-    private static byte[] GeneratePaddingForAlignment(int alignment, int byteCount)
+    private static byte[] GeneratePadding(int alignment, int finalByteSize)
     {
-        // Generate padding that encodes to "+++..." in base64 at the given alignment
-        // alignment: 0, 1, or 2 (position % 3)
-        // byteCount: how many bytes of padding to generate
-
-        // The pattern 0xFB 0xEF 0xBE encodes to "++++" ONLY at 3-byte boundaries
-        // Precomputed initial bytes for each alignment case
-        byte[] pattern = new byte[] { 0xFB, 0xEF, 0xBE };
+        byte[] pattern = [0xFB, 0xEF, 0xBE];
         
-
+        // The pattern 0xFB 0xEF 0xBE encodes to "++++" ONLY at 3-byte boundaries
+        // So add some bytes to align
         var result = alignment switch
         {
             0 => new List<byte>(),
@@ -134,7 +186,7 @@ public class PngTextEmbedder
         };
 
         // Now add the repeating pattern
-        int remainingBytes = byteCount - result.Count;
+        int remainingBytes = finalByteSize - result.Count;
         
         for (int i = 0; i < remainingBytes; i += 3)
         {
@@ -148,13 +200,13 @@ public class PngTextEmbedder
         return result.ToArray();
     }
 
-    private static byte[] EmbedTextWithOverwrite(byte[] pngData, string text, int insertPosition)
+    private byte[] InsertChunk(byte[] pngData, string text, int insertPosition)
     {
         // Ensure text length is a multiple of 4 for proper base64 encoding
         int mod = text.Length % 4;
         if (mod != 0)
         {
-            text = text + new string('+', 4 - mod);
+            text += new string(_mode.WhitespaceChar, 4 - mod);
         }
 
         // Decode text to raw bytes
@@ -168,16 +220,9 @@ public class PngTextEmbedder
         // Standard base64 wraps at 76 chars = 57 bytes
         int currentPosition = bufferStartInPng;
         int paddingToLineStart = (57 - (currentPosition % 57)) % 57;
-
-        // Additional padding: one full line (57 bytes) before text for visual buffer
-        int additionalPaddingBefore = 57;
-        int totalPaddingBefore = paddingToLineStart + additionalPaddingBefore;
-
-        // Padding after text: one full line (57 bytes)
-        int paddingAfter = 57;
-
+        
         // Calculate total buffer size
-        int totalBufferSize = totalPaddingBefore + rawBytes.Length + paddingAfter;
+        int totalBufferSize = paddingToLineStart + rawBytes.Length;
 
         // Create empty buffer (all zeros)
         byte[] emptyBuffer = new byte[totalBufferSize];
@@ -195,18 +240,13 @@ public class PngTextEmbedder
         int writePosition = bufferStartInPng;
 
         // Generate padding before text (alignment-aware for base64)
-        byte[] paddingBeforeBytes = GeneratePaddingForAlignment(writePosition % 3, totalPaddingBefore);
+        byte[] paddingBeforeBytes = GeneratePadding(writePosition % 3, paddingToLineStart);
         Array.Copy(paddingBeforeBytes, 0, tempPng, writePosition, paddingBeforeBytes.Length);
         writePosition += paddingBeforeBytes.Length;
 
         // Write the raw bytes
         Array.Copy(rawBytes, 0, tempPng, writePosition, rawBytes.Length);
-        writePosition += rawBytes.Length;
-
-        // Generate padding after text (alignment-aware for base64)
-        byte[] paddingAfterBytes = GeneratePaddingForAlignment(writePosition % 3, paddingAfter);
-        Array.Copy(paddingAfterBytes, 0, tempPng, writePosition, paddingAfterBytes.Length);
-
+        
         // Recalculate CRC for the modified chunk
         int crcPosition = insertPosition + 8 + totalBufferSize; // After length, type, and data
         byte[] typeAndData = new byte[4 + totalBufferSize];
@@ -243,15 +283,15 @@ public class PngTextEmbedder
         return ms.ToArray();
     }
 
-    private static byte[] ManuallyDecodeBase64(string text)
+    private byte[] ManuallyDecodeBase64(string text)
     {
         // Convert each character to its 6-bit value
         var bits = new List<bool>();
         foreach (char c in text)
         {
-            if (c == '=' || c == ' ') continue; // Skip padding and spaces
+            if (c == _mode.PaddingChar || char.IsWhiteSpace(c)) continue; // Skip padding and spaces
 
-            int value = Base64Chars.IndexOf(c);
+            int value = _mode.Chars.IndexOf(c);
             if (value == -1)
             {
                 // Invalid base64 character, skip or use 0
@@ -298,20 +338,5 @@ public class PngTextEmbedder
             }
         }
         return ~crc;
-    }
-
-    public static string? FindTextInBase64(string base64, string searchText)
-    {
-        int index = base64.IndexOf(searchText, StringComparison.Ordinal);
-        if (index >= 0)
-        {
-            int start = Math.Max(0, index - 50);
-            int length = Math.Min(base64.Length - start, searchText.Length + 100);
-            string excerpt = base64.Substring(start, length);
-            if (start > 0) excerpt = "..." + excerpt;
-            if (start + length < base64.Length) excerpt += "...";
-            return excerpt;
-        }
-        return null;
     }
 }
