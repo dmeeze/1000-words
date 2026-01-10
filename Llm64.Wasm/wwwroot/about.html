@@ -134,7 +134,8 @@ IxEC/AAAAApJREFUeJxjAAEAAAUAAQ0KLbQAAAAASUVORK5CYII=
                     in base64.  Our first problem is that base64 doesn't allow spaces, but maybe we're ok with
                     <code>+1000+words+</code> (we like our message to be a multiple of four characters).</p>
                 <p>We first need to work out what bytes encode to that base64 string.  That's easy enough, since 3 bytes
-                    is encoded as 4 base64 characters.  (3 * 8 bits = 24 bits of data) Then each of the 64 valid base64 characters represents 6 bits of data (2 * 6 bits = 24 bits).  So 3 bytes in the input becomes 4
+                    is encoded as 4 base64 characters.  (3 * 8 bits = 24 bits of data) Then each of the 64 valid base64 
+                    characters represents 6 bits of data (4 * 6 bits = 24 bits).  So 3 bytes in the input becomes 4
                     characters in the output.</p>
                 <p>Which means to show <code>+1000+words+</code> in the encoded data, we need the 3-byte sequences which create the
                     4-char values we want.</p>
